@@ -5,8 +5,8 @@ export async function generateAnswer(prompt: string) {
   const start = Date.now();
 
   const response = await ollama.chat({
-    model: "qwen3:4b",
-    // model: "gemma3:1b",
+    // model: "qwen3:4b",
+    model: "gemma3:1b",
     stream: false,
     // think: 'low',
     messages: [

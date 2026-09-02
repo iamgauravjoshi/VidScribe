@@ -56,10 +56,7 @@ export async function answerQuestion(
   // 5. Ask LLM
   const answer = await generateAnswer(prompt);
 
-  console.timeEnd("llm");
-
-  console.log("answer: ", answer);
-  
+  console.timeEnd("llm");  
 
   return {
     answer,

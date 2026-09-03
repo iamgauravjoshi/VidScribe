@@ -1,4 +1,4 @@
-import type { ChatMessage } from "../types/types.ts";
+import type { ChatMessage } from '../types/types.ts';
 
 interface Props {
   messages: ChatMessage[];
@@ -6,20 +6,15 @@ interface Props {
   timestamp?: String;
 }
 
-export function ChatWindow({messages, videoId}: Props) {
+export function ChatWindow({ messages, videoId }: Props) {
   return (
     <div>
-      {messages.map(
-        (message, index) => (
-          <div key={index}>
-            <strong>
-              {message.role === "user"
-                ? "You"
-                : "AI"}
-            </strong>
+      {messages.map((message, index) => (
+        <div key={index}>
+          <strong>{message.role === 'user' ? 'You' : 'AI'}</strong>
 
-            <p>{message.content}</p>
-            {/* <p>Sources:</p>
+          <p>{message.content}</p>
+          {/* <p>Sources:</p>
             <a 
               href={`https://www.youtube.com/watch?v=${videoId}&t=${timestamp}s`}
               target="_blank"
@@ -27,9 +22,8 @@ export function ChatWindow({messages, videoId}: Props) {
             >
               ▶ {timestamp}
             </a> */}
-          </div>
-        )
-      )}
+        </div>
+      ))}
     </div>
   );
 }

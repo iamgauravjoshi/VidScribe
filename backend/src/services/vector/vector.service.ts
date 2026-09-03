@@ -1,6 +1,6 @@
 // Save chunks and implement vector search
 
-import { pool } from "../../db/postgres.js";
+import { pool } from '../../db/postgres.js';
 
 export async function saveChunk(
   videoId: number,
@@ -8,7 +8,7 @@ export async function saveChunk(
   content: string,
   embedding: number[],
   startTime: number | null,
-  endTime: number | null
+  endTime: number | null,
 ) {
   await pool.query(
     `
@@ -22,22 +22,11 @@ export async function saveChunk(
       )
       VALUES ($1, $2, $3, $4, $5, $6)
     `,
-    [
-      videoId,
-      chunkIndex,
-      content,
-      startTime,
-      endTime,
-      JSON.stringify(embedding)
-    ]
+    [videoId, chunkIndex, content, startTime, endTime, JSON.stringify(embedding)],
   );
 }
 
-export async function searchSimilarChunks(
-  videoId: number,
-  queryEmbedding: number[],
-  limit = 3
-) {
+export async function searchSimilarChunks(videoId: number, queryEmbedding: number[], limit = 3) {
   const result = await pool.query(
     `
       SELECT
@@ -51,11 +40,7 @@ export async function searchSimilarChunks(
       ORDER BY embedding <=> $1::vector
       LIMIT $3
     `,
-    [
-      JSON.stringify(queryEmbedding),
-      videoId,
-      limit
-    ]
+    [JSON.stringify(queryEmbedding), videoId, limit],
   );
 
   return result.rows;

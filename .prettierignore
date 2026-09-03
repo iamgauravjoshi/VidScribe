@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+
+dist
+dist-ssr
+build
+coverage
+
+package-lock.json
+
+*.log
+
+.env
+.env.*
+!.env.example

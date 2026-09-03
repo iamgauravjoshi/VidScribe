@@ -1,42 +1,41 @@
 // Implementing the actual RAG query
 
-import { generateEmbedding } from "../embeddings/embedding.service.js";
-import { searchSimilarChunks } from "../vector/vector.service.js";
-import { generateAnswer } from "../llm/ollama.service.js";
+import { generateEmbedding } from '../embeddings/embedding.service.js';
+import { searchSimilarChunks } from '../vector/vector.service.js';
+import { generateAnswer } from '../llm/ollama.service.js';
 
-export async function answerQuestion(
-  videoId: number,
-  question: string
-) {
+export async function answerQuestion(videoId: number, question: string) {
   // 1. Convert question into vector
   const queryEmbedding = await generateEmbedding(question);
 
   // 2. Search relevant transcript chunks
   const chunks = await searchSimilarChunks(videoId, queryEmbedding, 3);
-  
-  // 3. Build context
-  const relevantChunks = chunks.filter(chunk => chunk.similarity >= 0.40);
 
-  if(relevantChunks.length === 0) {
+  // 3. Build context
+  const relevantChunks = chunks.filter((chunk) => chunk.similarity >= 0.4);
+
+  if (relevantChunks.length === 0) {
     return {
-      answer : {
+      answer: {
         message: {
-          role: "assistant",
-          content: "I couldn't find enough relevant information in the video to answer that question."
-        }
-      }
+          role: 'assistant',
+          content:
+            "I couldn't find enough relevant information in the video to answer that question.",
+        },
+      },
     };
   }
 
-  const context = relevantChunks.map(
+  const context = relevantChunks
+    .map(
       (chunk: any, index: number) =>
         `
             SOURCE ${index + 1}
             Timestamp: ${chunk.start_time_seconds} - ${chunk.end_time_seconds}
             Content: ${chunk.content}
-        `
+        `,
     )
-    .join("\n");
+    .join('\n');
 
   // 4. Build prompt
   const prompt = `
@@ -56,12 +55,12 @@ export async function answerQuestion(
     VIDEO CONTEXT: ${context}
     USER QUESTION: ${question}
   `;
-  
+
   // 5. Ask LLM
   const answer = await generateAnswer(prompt);
 
   return {
     answer,
-    sources: chunks
+    sources: chunks,
   };
 }

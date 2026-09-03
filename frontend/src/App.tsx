@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useState } from 'react';
 
-import { VideoInput } from "./components/VideoInput";
-import { ChatWindow } from "./components/ChatWindow";
-import { ChatInput } from "./components/ChatInput";
+import { VideoInput } from './components/VideoInput';
+import { ChatWindow } from './components/ChatWindow';
+import { ChatInput } from './components/ChatInput';
 
-import { processVideo, askQuestion } from "./services/api";
+import { processVideo, askQuestion } from './services/api';
 
-import type { ChatMessage } from "./types/types.ts";
+import type { ChatMessage } from './types/types.ts';
 
 function App() {
   const [videoId, setVideoId] = useState<number | null>(null);
@@ -28,7 +28,7 @@ function App() {
       setMessages([]);
     } catch (error) {
       console.error(error);
-      alert("Failed to process video");
+      alert('Failed to process video');
     } finally {
       setProcessing(false);
     }
@@ -42,33 +42,32 @@ function App() {
     setMessages((previous) => [
       ...previous,
       {
-        role: "user",
-        content: message
-      }
+        role: 'user',
+        content: message,
+      },
     ]);
 
     try {
       setAsking(true);
 
       const result = await askQuestion(videoId, message);
-      
+
       setMessages((previous) => [
         ...previous,
         {
-          role: "assistant",
-          content: result.answer.message.content
-        }
+          role: 'assistant',
+          content: result.answer.message.content,
+        },
       ]);
-
     } catch (error) {
       console.error(error);
 
       setMessages((previous) => [
         ...previous,
         {
-          role: "assistant",
-          content: "Sorry, I couldn't answer that."
-        }
+          role: 'assistant',
+          content: "Sorry, I couldn't answer that.",
+        },
       ]);
     } finally {
       setAsking(false);
@@ -78,8 +77,8 @@ function App() {
   function formatTimestamp(seconds: number) {
     const minutes = Math.floor(seconds / 60);
     const remaining = Math.floor(seconds % 60);
-  
-    return `${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
+
+    return `${String(minutes).padStart(2, '0')}:${String(remaining).padStart(2, '0')}`;
   }
 
   return (

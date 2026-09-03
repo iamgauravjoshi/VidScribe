@@ -1,4 +1,5 @@
 # What we are going to build?
+
 Our final application will be:
 
                     ┌──────────────────────────┐
@@ -27,8 +28,8 @@ Our final application will be:
        └─────────────┘   └──────────────┘   │ Embeddings  │
                                             └─────────────┘
 
-
 We'll use:
+
 - Frontend: React + TypeScript + SCSS
 - Backend: Node.js + Express + TypeScript
 - LLM: Ollama locally
@@ -39,12 +40,14 @@ We'll use:
 - Docker: PostgreSQL/pgvector initially
 - No LangChain initially — we will implement the RAG pipeline ourselves.
 
-
 ### Understand the two pipelines first
+
 This is the single most important architectural concept.
 
 ### Pipeline A — Ingestion (Video Processing Pipeline)
+
 When the user enters:
+
 > https://www.youtube.com/watch?v=ABC123
 
 ```mermaid
@@ -56,11 +59,13 @@ flowchart LR
     E --> F[Generate embeddings]
     F --> G[Store chunks + embeddings]
 ```
+
 This pipeline runs **once per video**.
 
-
 ### Pipeline B — Question answering
+
 When the user asks:
+
 > Why does the speaker use vector databases?
 
 ```mermaid
@@ -72,38 +77,42 @@ flowchart LR
     E --> F[Send prompt + context to LLM]
     F --> G[Answer]
 ```
+
 This happens **every time the user asks a question**.
 
-
 ## Prerequisites
+
 1. Node.js  
-`node --version`  
-`npm --version`
+   `node --version`  
+   `npm --version`
 
 2. Docker  
-`docker --version`  
-`docker compose version`
+   `docker --version`  
+   `docker compose version`
 
 3. Ollama  
-`npm i ollama`  
-`ollama --version`  
-`ollama list`
+   `npm i ollama`  
+   `ollama --version`  
+   `ollama list`
 
 4. Install an LLM  
-`ollama pull qwen3:4b`  
-`ollama run qwen3:4b`
+   `ollama pull qwen3:4b`  
+   `ollama run qwen3:4b`
 
 5. Install an embedding model  
-`ollama pull nomic-embed-text` 
+   `ollama pull nomic-embed-text`
 
 Notice the distinction:
+
 ```
 qwen3:4b → GENERATES ANSWERS
 nomic-embed-text → GENERATES VECTORS
 ```
 
 ### Create Docker container using docker-compose.yml
+
 Inside docker-compose.yml file, we configured:
+
 ```
 environment:
   POSTGRES_DB: vidscribe_rag
@@ -114,16 +123,21 @@ environment:
 This means docker will create a PostgreSQL database called: **vidscribe_rag**
 
 ### Backend Architecture
+
 ```mermaid
-flowchart TB
-    A[Controller] --> B[Service]
-    B --> C[Repository]
-    C --> D[Database]
+flowchart LR
+    A[Request] --> B[Route]
+    B --> C[Controller]
+    C --> D[Service]
+    D --> E[Repository]
+    E --> F[Database]
+
 ```
-Don't let controllers directly execute SQL.
 
 ### Create database schema
+
 ---
+
 Create the tables, columns, relationships, indexes, and pgvector configuration that our application needs. Eventually we'll have:
 
 ```
@@ -139,17 +153,19 @@ PostgreSQL Server
 
 Where should you create these tables
 
-
 ### Create tables inside database (hosted on docker)
+
 ---
+
 Since we're running PostgreSQL inside Docker, you have several options.
+
 - pgAdmin: we can visually see everything
 - psql
 
-
-### Option A - Using pgAdmin 
+### Option A - Using pgAdmin
 
 - **Step 01:** Connect pgAdmin to your PostgreSQL container. Your connection details are:
+
 ```
 Host: localhost
 Port: 5432
@@ -159,6 +175,7 @@ Database: your_database_name
 ```
 
 Once connected, you'll see something like:
+
 ```
 Servers
 └── PostgreSQL
@@ -171,20 +188,21 @@ Servers
                     └── ...
 ```
 
-- **Step 02:** 
-In pgAdmin Open Query Tool and execute  
-`CREATE EXTENSION IF NOT EXISTS vector;`
+- **Step 02:**
+  In pgAdmin Open Query Tool and execute  
+  `CREATE EXTENSION IF NOT EXISTS vector;`
 
 > **CREATE EXTENSION vector;**  
-It doesn't install pgvector. It only enables an extension that must already exist on the PostgreSQL server.
+> It doesn't install pgvector. It only enables an extension that must already exist on the PostgreSQL server.
 
 > **Why are we creating the vector extension?**  
-Answer: Normally PostgreSQL doesn't understand this: 
-[0.12, -0.45, 0.78, ...]
-pgvector adds support for storing and searching vectors. Basically this command tells PostgreSQL:
-Enable pgvector functionality in this database.
+> Answer: Normally PostgreSQL doesn't understand this:
+> [0.12, -0.45, 0.78, ...]
+> pgvector adds support for storing and searching vectors. Basically this command tells PostgreSQL:
+> Enable pgvector functionality in this database.
 
 - Step 03: Now create the **videos** table
+
 ```
 CREATE TABLE videos (
     id SERIAL PRIMARY KEY,
@@ -196,7 +214,7 @@ CREATE TABLE videos (
 ```
 
 - Step 04: Now create **video_chunks**  
-One YouTube video can have many chunks. So, this is a **one-to-many relationship**.
+  One YouTube video can have many chunks. So, this is a **one-to-many relationship**.
 
 ```
 CREATE TABLE video_chunks (
@@ -214,18 +232,21 @@ CREATE TABLE video_chunks (
 ```
 
 NOTE:
+
 > **ON DELETE CASCADE** means We don't want its chunks to remain in the database. It means,  
-`Delete video → Automatically delete its chunks`
+> `Delete video → Automatically delete its chunks`
 
 > **start_time_seconds REAL** AND **end_time_seconds REAL**
-These store where the chunk occurs in the YouTube video.
+> These store where the chunk occurs in the YouTube video.
 
 > **embedding VECTOR(768)** is where we store the embedding generated by our embedding model. Because the embedding model we're using produces a vector with a specific number of dimensions. (Different embedding models can produce different dimensions)
 
-
 ### Database Migrations
+
 ---
-In a real project we don't manually open pgAdmin and created the tables, instead we use database migrations. For example: 
+
+In a real project we don't manually open pgAdmin and created the tables, instead we use database migrations. For example:
+
 ```
 migrations/
 │
@@ -238,23 +259,23 @@ migrations/
 
 Then a new developer can clone the project and and get the entire database by running: `npm run db:migrate`
 
-
 ### Option B - Using psql
+
 You can also create everything directly from your Docker container. Run below command
 
 <!-- Enable docker container -->
+
 `docker exec -it vidscribe-postgres psql -U postgres -d vidscribe_rag`
 
 Now you'll enter PostgreSQL, and run all the same commands that we did in pgAdmin
 
-
 ## We using characters rather than tokens
+
 A production-grade chunker would ideally understand tokens.
 But initially: 3000 characters
 is much easier to understand than: ~700 tokens
 
 Once the system works, we'll improve it.
-
 
 # RAG ingestion pipeline
 
@@ -266,6 +287,7 @@ flowchart LR
     D --> E[Vectors]
     E --> F[PostgreSQL]
 ```
+
 That's the first half of your RAG application.
 Later we'll optimize ingestion with batching/concurrency.
 
@@ -281,8 +303,8 @@ flowchart LR
     F --> G[Answer]
 ```
 
-
 ## The LLM isn't directly querying PostgreSQL.
+
 It knows nothing about:
 PostgreSQL, pgvector, chunks, embeddings
 
@@ -290,6 +312,7 @@ It simply receives:
 instructions + retrieved context + question
 
 This is why the architecture is:
+
 ```
 Application
    │
@@ -299,11 +322,12 @@ Application
 ```
 
 ### Context related problem
+
 The retrieval system process one thing at a time. And further query related to previous input feels ambiguous. The embedding search doesn't necessarily know that.
 This is where **conversation history** becomes important.
 
-
 ### Add conversation history
+
 ```
 CREATE TABLE conversations (
     id SERIAL PRIMARY KEY,
@@ -325,13 +349,13 @@ CREATE TABLE messages (
 );
 ```
 
-## Query Rewriting/Contextual Query Rewriting  
-
-
+## Query Rewriting/Contextual Query Rewriting
 
 ## Now think like an engineer
+
 Your application has several failure points.
-For example: 
+For example:
+
 ```
 YouTube URL
     │
@@ -374,10 +398,11 @@ Retrieval
     ▼
   Answer
 ```
+
 A production application needs to handle every one of these.
 
-
 ## The complete architecture after all this
+
 ```
 ┌────────────────────────────────────────────────────────────┐
 │                         REACT                              │
@@ -447,18 +472,20 @@ A production application needs to handle every one of these.
                     └─────────────────┘
 ```
 
-
 # What you should learn from each stage
+
 After each stage, you should be able to explain:
 
 - Stage 1
 
 What is an LLM?
+
 > Prompt → LLM → Generated text
 
 - Stage 2
 
 What is an embedding?
+
 > Text → numerical vector
 
 - Stage 3
@@ -491,9 +518,10 @@ Adding retrieved information to the LLM prompt.
 What is generation?  
 The LLM generates the final response using the question + retrieved context.
 
-
 ## The implementation order I want you to follow
+
 Build and verify these checkpoints:
+
 ```
 CHECKPOINT 1
 ────────────
@@ -576,12 +604,12 @@ evaluation
 <!-- -------------------------------------------- -->
 
 Questions -
+
 - Explain 25. Now implement semantic search
 - Explain 26. Implement vector search
 - Explain 28. Build chunking
 - Why are we using characters rather than tokens?
 
 30. Understand chunking with a real example
+
 <!-- -------------------------------------------- -->
-
-

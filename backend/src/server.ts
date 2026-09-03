@@ -6,6 +6,10 @@ import { pool } from './db/postgres.js';
 import { config } from './shared/config/index.js';
 import { ingestVideo } from './services/ingestion/ingestion.service.js';
 import { answerQuestion } from './services/rag/rag.service.js';
+import { errorMiddleware } from './middleware/error.middleware.js';
+import { validate } from './middleware/validation.middleware.js';
+import { validateProcessVideoRequest } from './validators/video.validator.js';
+import { validateChatRequest, validateVideoIdParam } from './validators/chat.validator.js';
 
 const app = express();
 
@@ -18,21 +22,6 @@ app.get('/api/health', (_req, res) => {
     status: 'ok',
     message: 'YouTube RAG backend is running',
   });
-});
-
-// Testing locally configured LLM
-app.get('/api/test-llm', async (_req, res) => {
-  try {
-    const answer = await generateAnswer('Explain RAG in one simple paragraph.');
-
-    res.json({ answer });
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: 'Failed to communicate with Ollama',
-    });
-  }
 });
 
 // Testing Embeddings Model
@@ -72,7 +61,7 @@ app.get('/api/test-db', async (_req, res) => {
 });
 
 // process-video endpoint
-app.post('/api/videos/process', async (req, res) => {
+app.post('/api/videos/process', validate(validateProcessVideoRequest), async (req, res) => {
   try {
     const { url } = req.body;
 
@@ -95,44 +84,52 @@ app.post('/api/videos/process', async (req, res) => {
 });
 
 // Chat endpoint
-app.post('/api/videos/:videoId/chat', async (req, res) => {
-  try {
-    const videoId = Number(req.params.videoId);
-    const { message } = req.body;
+app.post(
+  '/api/videos/:videoId/chat',
+  validate(validateVideoIdParam),
+  validate(validateChatRequest),
+  async (req, res) => {
+    try {
+      const videoId = Number(req.params.videoId);
+      const { question } = req.body;
 
-    if (!message) {
-      return res.status(400).json({
-        message: 'Question is required',
+      if (!question) {
+        return res.status(400).json({
+          message: 'Question is required',
+        });
+      }
+
+      if (Number.isNaN(videoId)) {
+        return res.status(400).json({
+          message: 'Invalid videoId',
+        });
+      }
+
+      // Check PostgreSQL first
+      const videoIdResult = await pool.query('SELECT id FROM videos WHERE id = $1', [videoId]);
+
+      if (videoIdResult.rows.length === 0) {
+        return res.status(404).json({
+          message: 'Video not found',
+        });
+      }
+
+      // Video exists → now do RAG / LLM
+      const result = await answerQuestion(videoId, question);
+
+      res.json(result);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        message: 'Failed to answer question',
       });
     }
+  },
+);
 
-    if (Number.isNaN(videoId)) {
-      return res.status(400).json({
-        message: 'Invalid videoId',
-      });
-    }
-
-    // Check PostgreSQL first
-    const videoIdResult = await pool.query('SELECT id FROM videos WHERE id = $1', [videoId]);
-
-    if (videoIdResult.rows.length === 0) {
-      return res.status(404).json({
-        message: 'Video not found',
-      });
-    }
-
-    // Video exists → now do RAG / LLM
-    const result = await answerQuestion(videoId, message);
-
-    res.json(result);
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: 'Failed to answer question',
-    });
-  }
-});
+// Global error middleware should be registered after your routes.
+app.use(errorMiddleware);
 
 app.listen(config.server.port, () => {
   console.log(`Backend running on http://localhost:${config.server.port}`);

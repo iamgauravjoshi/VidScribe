@@ -19,7 +19,6 @@ type NodeEnvironment = 'development' | 'test' | 'production';
 
 /**
  * Retrieves a required environment variable.
- *
  * Throws an error when the variable is missing or empty.
  */
 function getRequiredEnv(name: string): string {
@@ -32,6 +31,10 @@ function getRequiredEnv(name: string): string {
   return value.trim();
 }
 
+/**
+ * Retrieves a numeric environment variable.
+ * Performs basic numeric validation.
+ */
 function getNumberEnv(name: string, defaultValue?: number): number {
   const value = process.env[name];
 
@@ -43,6 +46,21 @@ function getNumberEnv(name: string, defaultValue?: number): number {
     throw new Error(`Missing required environment variable: ${name}`);
   }
 
+  /**
+   * Validates a URL environment variable.
+   */
+  function getUrlEnv(name: string): string {
+    const value = getRequiredEnv(name);
+
+    try {
+      new URL(value);
+    } catch {
+      throw new Error(`Environment variable ${name} must be a valid URL. Received: "${value}"`);
+    }
+
+    return value;
+  }
+
   const parsedValue = Number(value);
 
   if (!Number.isFinite(parsedValue)) {
@@ -52,6 +70,9 @@ function getNumberEnv(name: string, defaultValue?: number): number {
   return parsedValue;
 }
 
+/**
+ * Reads and validates NODE_ENV.
+ */
 function getNodeEnvironment(): NodeEnvironment {
   const value = process.env.NODE_ENV ?? 'development';
 

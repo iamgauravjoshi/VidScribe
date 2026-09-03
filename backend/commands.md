@@ -113,6 +113,14 @@ environment:
 
 This means docker will create a PostgreSQL database called: **vidscribe_rag**
 
+### Backend Architecture
+```mermaid
+flowchart TB
+    A[Controller] --> B[Service]
+    B --> C[Repository]
+    C --> D[Database]
+```
+Don't let controllers directly execute SQL.
 
 ### Create database schema
 ---

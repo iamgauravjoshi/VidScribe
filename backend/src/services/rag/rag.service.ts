@@ -8,21 +8,22 @@ export async function answerQuestion(
   videoId: number,
   question: string
 ) {
-  console.time("queryEmbedding");
   // 1. Convert question into vector
   const queryEmbedding = await generateEmbedding(question);
-
-  console.timeEnd("queryEmbedding");
-  console.time("vectorSearch");
 
   // 2. Search relevant transcript chunks
   const chunks = await searchSimilarChunks(videoId, queryEmbedding, 3);
 
-  console.timeEnd("vectorSearch");
-
   // 3. Build context
-  const context = chunks
-    .map(
+  const relevantChunks = chunks.filter(chunk => chunk.similarity >= 0.70);
+
+  if(relevantChunks.length === 0) {
+    return {
+      message: "I couldn't find enough relevant information in the video to answer that question.",
+    };
+  }
+
+  const context = relevantChunks.map(
       (chunk: any, index: number) =>
         `
             SOURCE ${index + 1}
@@ -50,13 +51,9 @@ export async function answerQuestion(
     VIDEO CONTEXT: ${context}
     USER QUESTION: ${question}
   `;
-
-  console.time("llm");
   
   // 5. Ask LLM
   const answer = await generateAnswer(prompt);
-
-  console.timeEnd("llm");  
 
   return {
     answer,

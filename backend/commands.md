@@ -235,12 +235,12 @@ Then a new developer can clone the project and and get the entire database by ru
 You can also create everything directly from your Docker container. Run below command
 
 <!-- Enable docker container -->
-docker exec -it vidscribe-postgres psql -U postgres -d vidscribe_rag
+`docker exec -it vidscribe-postgres psql -U postgres -d vidscribe_rag`
 
 Now you'll enter PostgreSQL, and run all the same commands that we did in pgAdmin
 
 
-## we using characters rather than tokens
+## We using characters rather than tokens
 A production-grade chunker would ideally understand tokens.
 But initially: 3000 characters
 is much easier to understand than: ~700 tokens
@@ -261,7 +261,7 @@ flowchart LR
 That's the first half of your RAG application.
 Later we'll optimize ingestion with batching/concurrency.
 
-# Actual RAG Query
+## Actual RAG Query
 
 ```mermaid
 flowchart LR
@@ -274,7 +274,7 @@ flowchart LR
 ```
 
 
-# The LLM isn't directly querying PostgreSQL.
+## The LLM isn't directly querying PostgreSQL.
 It knows nothing about:
 PostgreSQL, pgvector, chunks, embeddings
 
@@ -290,6 +290,282 @@ Application
    └── LLM generation
 ```
 
+### Context related problem
+The retrieval system process one thing at a time. And further query related to previous input feels ambiguous. The embedding search doesn't necessarily know that.
+This is where **conversation history** becomes important.
+
+
+### Add conversation history
+```
+CREATE TABLE conversations (
+    id SERIAL PRIMARY KEY,
+    video_id INTEGER NOT NULL
+        REFERENCES videos(id)
+        ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE messages (
+    id SERIAL PRIMARY KEY,
+    conversation_id INTEGER NOT NULL
+        REFERENCES conversations(id)
+        ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+## Query Rewriting/Contextual Query Rewriting  
+
+
+
+## Now think like an engineer
+Your application has several failure points.
+For example: 
+```
+YouTube URL
+    │
+    ├── invalid URL
+    │
+    ├── video unavailable
+    │
+    ├── transcript unavailable
+    │
+    ├── YouTube request blocked
+    │
+    ▼
+Transcript
+    │
+    ├── empty transcript
+    │
+    ▼
+Chunking
+    │
+    ▼
+Embedding
+    │
+    ├── Ollama unavailable
+    │
+    ▼
+PostgreSQL
+    │
+    ├── DB unavailable
+    │
+    ▼
+Retrieval
+    │
+    ├── no relevant chunks
+    │
+    ▼
+   LLM
+    │
+    ├── Ollama unavailable
+    │
+    ▼
+  Answer
+```
+A production application needs to handle every one of these.
+
+
+## The complete architecture after all this
+```
+┌────────────────────────────────────────────────────────────┐
+│                         REACT                              │
+│                                                            │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ YouTube URL                                          │  │
+│  │ [ https://youtube.com/watch?v=... ] [Process]       │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                            │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ Chat                                                 │  │
+│  │                                                      │  │
+│  │ You: What is RAG?                                   │  │
+│  │                                                      │  │
+│  │ AI: RAG is...                                       │  │
+│  │                                                      │  │
+│  │ Sources: 02:14, 03:01                               │  │
+│  └──────────────────────────────────────────────────────┘  │
+└────────────────────────────┬───────────────────────────────┘
+                             │
+                             ▼
+┌────────────────────────────────────────────────────────────┐
+│                     EXPRESS API                            │
+│                                                            │
+│ POST /videos/process                                       │
+│ POST /videos/:id/chat                                      │
+└─────────────┬──────────────────────────────┬───────────────┘
+              │                              │
+              ▼                              ▼
+┌──────────────────────┐          ┌─────────────────────────┐
+│ INGESTION PIPELINE   │          │ QUERY PIPELINE          │
+│                      │          │                         │
+│ YouTube URL          │          │ User question           │
+│      ↓               │          │      ↓                  │
+│ Transcript           │          │ Query embedding         │
+│      ↓               │          │      ↓                  │
+│ Chunking             │          │ Vector search           │
+│      ↓               │          │      ↓                  │
+│ Embeddings           │          │ Relevant chunks         │
+│      ↓               │          │      ↓                  │
+│ PostgreSQL           │          │ RAG prompt              │
+│                      │          │      ↓                  │
+└──────────┬───────────┘          │ Ollama                  │
+           │                      │      ↓                  │
+           │                      │ Answer                  │
+           │                      └──────────┬──────────────┘
+           │                                 │
+           ▼                                 ▼
+┌────────────────────────────────────────────────────────────┐
+│                 POSTGRESQL + PGVECTOR                     │
+│                                                            │
+│ videos                                                     │
+│ video_chunks                                               │
+│ conversations                                              │
+│ messages                                                   │
+│                                                            │
+│ embeddings                                                 │
+└────────────────────────────────────────────────────────────┘
+                             │
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │     OLLAMA      │
+                    │                 │
+                    │ Qwen            │
+                    │                 │
+                    │ Embedding model │
+                    └─────────────────┘
+```
+
+
+# What you should learn from each stage
+After each stage, you should be able to explain:
+
+- Stage 1
+
+What is an LLM?
+> Prompt → LLM → Generated text
+
+- Stage 2
+
+What is an embedding?
+> Text → numerical vector
+
+- Stage 3
+
+Why do we need embeddings?  
+Because we want semantic similarity.
+
+- Stage 4
+
+Why pgvector?
+Because we need to efficiently search vectors.
+
+- Stage 5
+
+Why chunk documents?  
+Because we don't want to retrieve or send an entire video transcript for every question.
+
+- Stage 6
+
+What is retrieval?  
+Finding the most relevant chunks for a question.
+
+- Stage 7
+
+What is augmentation?  
+Adding retrieved information to the LLM prompt.
+
+- Stage 8
+
+What is generation?  
+The LLM generates the final response using the question + retrieved context.
+
+
+## The implementation order I want you to follow
+Build and verify these checkpoints:
+```
+CHECKPOINT 1
+────────────
+Ollama works
+        ↓
+"Explain RAG"
+        ↓
+Answer
+
+
+CHECKPOINT 2
+────────────
+Embedding works
+        ↓
+text → vector
+
+
+CHECKPOINT 3
+────────────
+PostgreSQL + pgvector
+        ↓
+vector stored successfully
+
+
+CHECKPOINT 4
+────────────
+Semantic search
+        ↓
+question → relevant chunks
+
+
+CHECKPOINT 5
+────────────
+Basic RAG
+        ↓
+question → search → LLM → answer
+
+
+CHECKPOINT 6
+────────────
+YouTube ingestion
+        ↓
+URL → transcript → chunks → embeddings
+
+
+CHECKPOINT 7
+────────────
+React
+        ↓
+URL → process → chat
+
+
+CHECKPOINT 8
+────────────
+Conversation memory
+        ↓
+multi-turn chat
+
+
+CHECKPOINT 9
+────────────
+Citations
+        ↓
+answer → video timestamps
+
+
+CHECKPOINT 10
+─────────────
+Production improvements
+        ↓
+streaming
+queues
+reranking
+query rewriting
+evaluation
+```
+
+## ggggg
+
 <!-- -------------------------------------------- -->
 
 Questions -
@@ -299,24 +575,6 @@ Questions -
 - Why are we using characters rather than tokens?
 30. Understand chunking with a real example
 <!-- -------------------------------------------- -->
-
-- process-video endpoint
-POST /api/videos/process
-{
-  "url": "https://www.youtube.com/watch?v=YOUR_VIDEO"
-}
-
-- chat endpoint
-POST /api/videos/1/chat
-{
-  "message": "What is the main topic of this video?"
-}
-
-you should receive -
-{
-  "answer": "...",
-  "sources": [...]
-}
 
 
 in the "ingestion.service.ts", on this below line -

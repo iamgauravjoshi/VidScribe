@@ -19,8 +19,6 @@ export async function generateAnswer(prompt: string) {
 
   const duration = Date.now() - start;
 
-  console.log(`Ollama: Response received in ${duration}ms`);
-
   // return response.message.content;
   return response;
 }

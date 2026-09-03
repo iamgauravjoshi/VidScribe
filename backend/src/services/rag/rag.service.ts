@@ -13,13 +13,18 @@ export async function answerQuestion(
 
   // 2. Search relevant transcript chunks
   const chunks = await searchSimilarChunks(videoId, queryEmbedding, 3);
-
+  
   // 3. Build context
-  const relevantChunks = chunks.filter(chunk => chunk.similarity >= 0.70);
+  const relevantChunks = chunks.filter(chunk => chunk.similarity >= 0.40);
 
   if(relevantChunks.length === 0) {
     return {
-      message: "I couldn't find enough relevant information in the video to answer that question.",
+      answer : {
+        message: {
+          role: "assistant",
+          content: "I couldn't find enough relevant information in the video to answer that question."
+        }
+      }
     };
   }
 

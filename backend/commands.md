@@ -376,17 +376,17 @@ A production application needs to handle every one of these.
 │                                                            │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │ YouTube URL                                          │  │
-│  │ [ https://youtube.com/watch?v=... ] [Process]       │  │
+│  │ [ https://youtube.com/watch?v=... ] [Process]        │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                                                            │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ Chat                                                 │  │
+│  │                       Chat                           │  │
 │  │                                                      │  │
-│  │ You: What is RAG?                                   │  │
+│  │ You: What is RAG?                                    │  │
 │  │                                                      │  │
-│  │ AI: RAG is...                                       │  │
+│  │ AI: RAG is...                                        │  │
 │  │                                                      │  │
-│  │ Sources: 02:14, 03:01                               │  │
+│  │ Sources: 02:14, 03:01                                │  │
 │  └──────────────────────────────────────────────────────┘  │
 └────────────────────────────┬───────────────────────────────┘
                              │
@@ -394,8 +394,8 @@ A production application needs to handle every one of these.
 ┌────────────────────────────────────────────────────────────┐
 │                     EXPRESS API                            │
 │                                                            │
-│ POST /videos/process                                       │
-│ POST /videos/:id/chat                                      │
+│                 POST /videos/process                       │
+│                 POST /videos/:id/chat                      │
 └─────────────┬──────────────────────────────┬───────────────┘
               │                              │
               ▼                              ▼
@@ -419,7 +419,7 @@ A production application needs to handle every one of these.
            │                                 │
            ▼                                 ▼
 ┌────────────────────────────────────────────────────────────┐
-│                 POSTGRESQL + PGVECTOR                     │
+│                 POSTGRESQL + PGVECTOR                      │
 │                                                            │
 │ videos                                                     │
 │ video_chunks                                               │
@@ -434,8 +434,7 @@ A production application needs to handle every one of these.
                     ┌─────────────────┐
                     │     OLLAMA      │
                     │                 │
-                    │ Qwen            │
-                    │                 │
+                    │      Qwen       │
                     │ Embedding model │
                     └─────────────────┘
 ```
@@ -491,72 +490,72 @@ Build and verify these checkpoints:
 CHECKPOINT 1
 ────────────
 Ollama works
-        ↓
+    ↓
 "Explain RAG"
-        ↓
+    ↓
 Answer
 
 
 CHECKPOINT 2
 ────────────
 Embedding works
-        ↓
+    ↓
 text → vector
 
 
 CHECKPOINT 3
 ────────────
 PostgreSQL + pgvector
-        ↓
+    ↓
 vector stored successfully
 
 
 CHECKPOINT 4
 ────────────
 Semantic search
-        ↓
+    ↓
 question → relevant chunks
 
 
 CHECKPOINT 5
 ────────────
 Basic RAG
-        ↓
+    ↓
 question → search → LLM → answer
 
 
 CHECKPOINT 6
 ────────────
 YouTube ingestion
-        ↓
+    ↓
 URL → transcript → chunks → embeddings
 
 
 CHECKPOINT 7
 ────────────
 React
-        ↓
+    ↓
 URL → process → chat
 
 
 CHECKPOINT 8
 ────────────
 Conversation memory
-        ↓
+    ↓
 multi-turn chat
 
 
 CHECKPOINT 9
 ────────────
 Citations
-        ↓
+    ↓
 answer → video timestamps
 
 
 CHECKPOINT 10
 ─────────────
 Production improvements
-        ↓
+    ↓
 streaming
 queues
 reranking
@@ -564,7 +563,7 @@ query rewriting
 evaluation
 ```
 
-## ggggg
+## ggggggggg
 
 <!-- -------------------------------------------- -->
 
@@ -573,15 +572,8 @@ Questions -
 - Explain 26. Implement vector search
 - Explain 28. Build chunking
 - Why are we using characters rather than tokens?
+
 30. Understand chunking with a real example
 <!-- -------------------------------------------- -->
 
 
-in the "ingestion.service.ts", on this below line -
-const chunks = createChunks(transcript);
-
-i'm getting this error -
-
-Argument of type 'TranscriptResponse[]' is not assignable to parameter of type 'TranscriptSegment[]'.
-Property 'start' is missing in type 'TranscriptResponse' but required in type 'TranscriptSegment'.
-chunk.service.ts(5, 3): 'start' is declared here.

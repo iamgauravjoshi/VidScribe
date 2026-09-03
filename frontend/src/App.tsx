@@ -51,7 +51,7 @@ function App() {
       setAsking(true);
 
       const result = await askQuestion(videoId, message);
-
+      
       setMessages((previous) => [
         ...previous,
         {

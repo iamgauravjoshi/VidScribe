@@ -613,3 +613,20 @@ Questions -
 30. Understand chunking with a real example
 
 <!-- -------------------------------------------- -->
+
+# SPRINT 01 - Architecture assessment
+
+# SPRINT 02 -
+
+```
+Step 1: Environment Configuration
+Step 2: Configuration Validation
+Step 3: Application Errors
+Step 4: Global Error Middleware
+Step 5: Request Validation
+Step 6: Structured Logging
+Step 7: /api/health
+Step 8: Controller → Service → Repository Cleanup
+Step 9: Ollama timeout & error handling
+Step 10: Establish video processing lifecycle status (PENDING → PROCESSING → COMPLETED / FAILED)
+```

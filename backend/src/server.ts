@@ -1,7 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import { generateAnswer } from './services/llm/ollama.service.js';
-import { generateEmbedding } from './services/embeddings/embedding.service.js';
 import { pool } from './db/postgres.js';
 import { config } from './shared/config/index.js';
 import { ingestVideo } from './services/ingestion/ingestion.service.js';
@@ -10,6 +8,8 @@ import { errorMiddleware } from './middleware/error.middleware.js';
 import { validate } from './middleware/validation.middleware.js';
 import { validateProcessVideoRequest } from './validators/video.validator.js';
 import { validateChatRequest, validateVideoIdParam } from './validators/chat.validator.js';
+import { getHealth } from './controllers/health.controller.js';
+import { logger } from './shared/logger/index.js';
 
 const app = express();
 
@@ -17,30 +17,7 @@ app.use(cors());
 app.use(express.json());
 
 // Health check API
-app.get('/api/health', (_req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'YouTube RAG backend is running',
-  });
-});
-
-// Testing Embeddings Model
-app.get('/api/test-embedding', async (_req, res) => {
-  try {
-    const embedding = await generateEmbedding('What is retrieval augmented generation?');
-
-    res.json({
-      dimensions: embedding.length,
-      embedding,
-    });
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: 'Failed to generate embedding',
-    });
-  }
-});
+app.get('/api/health', getHealth);
 
 // Testing PostgreSQL
 app.get('/api/test-db', async (_req, res) => {
@@ -58,6 +35,10 @@ app.get('/api/test-db', async (_req, res) => {
       connected: false,
     });
   }
+});
+
+app.get('/api/test/error', () => {
+  throw new Error('Testing global error logging');
 });
 
 // process-video endpoint
@@ -132,5 +113,8 @@ app.post(
 app.use(errorMiddleware);
 
 app.listen(config.server.port, () => {
-  console.log(`Backend running on http://localhost:${config.server.port}`);
+  logger.info('Backend server started', {
+    port: config.server.port,
+    environment: config.nodeEnv,
+  });
 });

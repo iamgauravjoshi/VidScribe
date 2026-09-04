@@ -10,3 +10,9 @@ export const pool = new Pool({
   user: config.postgres.user,
   password: config.postgres.password,
 });
+
+// logger.info('PostgreSQL connection established');
+
+// logger.error('PostgreSQL connection failed', {
+//   error: error instanceof Error ? error.message : String(error),
+// });

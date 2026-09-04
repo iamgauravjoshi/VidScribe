@@ -46,21 +46,6 @@ function getNumberEnv(name: string, defaultValue?: number): number {
     throw new Error(`Missing required environment variable: ${name}`);
   }
 
-  /**
-   * Validates a URL environment variable.
-   */
-  function getUrlEnv(name: string): string {
-    const value = getRequiredEnv(name);
-
-    try {
-      new URL(value);
-    } catch {
-      throw new Error(`Environment variable ${name} must be a valid URL. Received: "${value}"`);
-    }
-
-    return value;
-  }
-
   const parsedValue = Number(value);
 
   if (!Number.isFinite(parsedValue)) {
@@ -68,6 +53,21 @@ function getNumberEnv(name: string, defaultValue?: number): number {
   }
 
   return parsedValue;
+}
+
+/**
+ * Validates a URL environment variable.
+ */
+function getUrlEnv(name: string): string {
+  const value = getRequiredEnv(name);
+
+  try {
+    new URL(value);
+  } catch {
+    throw new Error(`Environment variable ${name} must be a valid URL. Received: "${value}"`);
+  }
+
+  return value;
 }
 
 /**
@@ -99,9 +99,10 @@ export const config = {
   },
 
   ollama: {
-    baseUrl: getRequiredEnv('OLLAMA_BASE_URL'),
+    baseUrl: getUrlEnv('OLLAMA_BASE_URL'),
     chatModel: getRequiredEnv('OLLAMA_CHAT_MODEL'),
     embeddingModel: getRequiredEnv('OLLAMA_EMBEDDING_MODEL'),
+    requestTimeoutMs: getNumberEnv('OLLAMA_REQUEST_TIMEOUT_MS'),
   },
 
   rag: {

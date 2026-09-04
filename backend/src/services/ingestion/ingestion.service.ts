@@ -9,54 +9,73 @@ import { createChunks } from './chunk.service.js';
 import { generateEmbedding } from '../embeddings/embedding.service.js';
 import { saveChunk } from '../vector/vector.service.js';
 
+import { VideoProcessingStatus } from '../../types/video.type.js';
+import {
+  createVideo,
+  findVideoByYouTubeId,
+  updateVideoProcessingStatus,
+} from '../../repositories/video.repository.js';
+
 export async function ingestVideo(url: string) {
   const { videoId, transcript } = await getTranscript(url);
 
-  const existingVideo = await pool.query(
-    `
-        SELECT id
-        FROM videos
-        WHERE youtube_video_id = $1
-      `,
-    [videoId],
-  );
+  const existingVideo = await findVideoByYouTubeId(videoId);
 
-  if (existingVideo.rows.length > 0) {
+  if (existingVideo) {
     return {
       videoId,
-      databaseId: existingVideo.rows[0].id,
+      databaseId: existingVideo.id,
       alreadyProcessed: true,
+      processingStatus: existingVideo.processingStatus,
     };
   }
 
-  const videoResult = await pool.query(
-    `
-      INSERT INTO videos (
-        youtube_video_id,
-        url
-      )
-      VALUES ($1, $2)
-      RETURNING id
-    `,
-    [videoId, url],
-  );
+  const video = await createVideo(videoId, url, VideoProcessingStatus.PENDING);
 
-  const databaseVideoId = videoResult.rows[0].id;
+  try {
+    await updateVideoProcessingStatus(video.id, VideoProcessingStatus.PROCESSING);
 
-  const chunks = createChunks(transcript, 2000);
+    const chunks = createChunks(transcript, 2000);
 
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
+    // for (let i = 0; i < chunks.length; i++) {
+    //   const chunk = chunks[i];
 
-    const embedding = await generateEmbedding(chunk.content);
+    //   const embedding = await generateEmbedding(chunk.content);
 
-    await saveChunk(databaseVideoId, i, chunk.content, embedding, chunk.startTime, chunk.endTime);
+    //   await saveChunk(databaseVideoId, i, chunk.content, embedding, chunk.startTime, chunk.endTime);
+    // }
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+
+      const embedding = await generateEmbedding(chunk.content);
+
+      // await createChunk({
+      //   videoId: video.id,
+      //   chunkIndex: i,
+      //   content: chunk.content,
+      //   embedding,
+      //   startTimeSeconds: chunk.startTime,
+      //   endTimeSeconds: chunk.endTime,
+      // });
+
+      // await saveChunk(databaseVideoId, i, chunk.content, embedding, chunk.startTime, chunk.endTime);
+
+      await saveChunk(video.id, i, chunk.content, embedding, chunk.startTime, chunk.endTime);
+    }
+
+    await updateVideoProcessingStatus(video.id, VideoProcessingStatus.COMPLETED);
+
+    return {
+      videoId,
+      databaseId: video.id,
+      chunksProcessed: chunks.length,
+      alreadyProcessed: false,
+      processingStatus: VideoProcessingStatus.COMPLETED,
+    };
+  } catch (error: unknown) {
+    await updateVideoProcessingStatus(video.id, VideoProcessingStatus.FAILED);
+
+    throw error;
   }
-
-  return {
-    videoId,
-    databaseId: databaseVideoId,
-    chunksProcessed: chunks.length,
-    alreadyProcessed: false,
-  };
 }

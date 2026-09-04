@@ -22,7 +22,7 @@ export async function askQuestion(videoId: number, message: string) {
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ question: message }),
   });
 
   if (!response.ok) {

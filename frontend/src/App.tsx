@@ -52,11 +52,14 @@ function App() {
 
       const result = await askQuestion(videoId, message);
 
+      console.log('result: ', result);
+
       setMessages((previous) => [
         ...previous,
         {
           role: 'assistant',
-          content: result.answer.message.content,
+          content: result.answer,
+          // content: result.answer.message.content,
         },
       ]);
     } catch (error) {

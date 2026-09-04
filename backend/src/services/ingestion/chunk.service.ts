@@ -1,4 +1,14 @@
-// Build chunking
+/*
+Build chunking
+
+Transcript
+    ↓
+Chunking algorithm
+    ↓
+TextChunk[]
+
+That is business/domain logic.
+*/
 
 import type { TextChunk } from '../../types/chunk.type.js';
 import type { TranscriptSegment } from '../../types/transcript.type.js';

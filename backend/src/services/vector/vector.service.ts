@@ -2,30 +2,6 @@
 
 import { pool } from '../../db/postgres.js';
 
-export async function saveChunk(
-  videoId: number,
-  chunkIndex: number,
-  content: string,
-  embedding: number[],
-  startTime: number | null,
-  endTime: number | null,
-) {
-  await pool.query(
-    `
-      INSERT INTO video_chunks (
-        video_id,
-        chunk_index,
-        content,
-        start_time_seconds,
-        end_time_seconds,
-        embedding
-      )
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `,
-    [videoId, chunkIndex, content, startTime, endTime, JSON.stringify(embedding)],
-  );
-}
-
 export async function searchSimilarChunks(videoId: number, queryEmbedding: number[], limit = 3) {
   const result = await pool.query(
     `
@@ -45,3 +21,12 @@ export async function searchSimilarChunks(videoId: number, queryEmbedding: numbe
 
   return result.rows;
 }
+
+/*
+However, structurally I would eventually move: searchSimilarChunks()
+
+into: repositories/chunk.repository.ts
+
+because it is database access.
+That will happen naturally when we improve retrieval in later steps.
+*/

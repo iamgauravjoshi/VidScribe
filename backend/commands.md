@@ -629,4 +629,6 @@ Step 7: /api/health
 Step 8: Controller → Service → Repository Cleanup
 Step 9: Ollama timeout & error handling
 Step 10: Establish video processing lifecycle status (PENDING → PROCESSING → COMPLETED / FAILED)
+Step 11: Duplicate Detection
+Step 12: Transaction-Safe Ingestion
 ```

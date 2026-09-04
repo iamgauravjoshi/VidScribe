@@ -10,84 +10,83 @@ export interface VideoRecord {
   createdAt: Date;
 }
 
-export async function findVideoByYouTubeId(videoId: string): Promise<VideoRecord | null> {
-  const result = await pool.query<VideoRecord>(
-    `
-    SELECT
-      id,
-      youtube_video_id,
-      url,
-      title,
-      processing_status,
-      created_at
-    FROM videos
-    WHERE youtube_video_id = $1
-    LIMIT 1
-    `,
-    [videoId],
-  );
+interface VideoRow {
+  id: number;
+  youtube_video_id: string;
+  url: string;
+  title: string | null;
+  processing_status: VideoProcessingStatus;
+  created_at: Date;
+}
 
-  if (result.rows.length === 0) {
-    return null;
-  }
-
-  const row = result.rows[0];
-
+function mapVideoRow(row: VideoRow): VideoRecord {
   return {
     id: row.id,
-    youtubeVideoId: row.youtubeVideoId,
+    youtubeVideoId: row.youtube_video_id,
     url: row.url,
     title: row.title,
-    processingStatus: row.processingStatus,
-    createdAt: row.createdAt,
+    processingStatus: row.processing_status,
+    createdAt: row.created_at,
   };
 }
 
-export async function findVideoById(id: number): Promise<VideoRecord | null> {
-  const result = await pool.query<VideoRecord>(
+export async function findVideoByYouTubeId(youtubeVideoId: string): Promise<VideoRecord | null> {
+  const result = await pool.query<VideoRow>(
     `
-    SELECT
-      id,
-      youtube_video_id,
-      url,
-      title,
-      processing_status,
-      created_at
-    FROM videos
-    WHERE id = $1
+      SELECT
+        id,
+        youtube_video_id,
+        url,
+        title,
+        processing_status,
+        created_at
+      FROM videos
+      WHERE youtube_video_id = $1
+      LIMIT 1
+    `,
+    [youtubeVideoId],
+  );
+
+  const row = result.rows[0];
+
+  return row ? mapVideoRow(row) : null;
+}
+
+export async function findVideoById(id: number): Promise<VideoRecord | null> {
+  const result = await pool.query<VideoRow>(
+    `
+      SELECT
+        id,
+        youtube_video_id,
+        url,
+        title,
+        processing_status,
+        created_at
+      FROM videos
+      WHERE id = $1
+      LIMIT 1
     `,
     [id],
   );
 
-  if (result.rows.length === 0) {
-    return null;
-  }
-
   const row = result.rows[0];
 
-  return {
-    id: row.id,
-    youtubeVideoId: row.youtubeVideoId,
-    url: row.url,
-    title: row.title,
-    processingStatus: row.processingStatus,
-    createdAt: row.createdAt,
-  };
+  return row ? mapVideoRow(row) : null;
 }
 
 export async function createVideo(
-  videoId: string,
+  youtubeVideoId: string,
   url: string,
   processingStatus: VideoProcessingStatus,
 ): Promise<VideoRecord> {
-  const result = await pool.query<VideoRecord>(
+  const result = await pool.query<VideoRow>(
     `
       INSERT INTO videos (
         youtube_video_id,
         url,
         processing_status
       )
-      VALUES ($1, $2)
+      VALUES ($1, $2, $3)
       RETURNING
         id,
         youtube_video_id,
@@ -96,19 +95,10 @@ export async function createVideo(
         processing_status,
         created_at
     `,
-    [videoId, url, processingStatus],
+    [youtubeVideoId, url, processingStatus],
   );
 
-  const row = result.rows[0];
-
-  return {
-    id: row.id,
-    youtubeVideoId: row.youtubeVideoId,
-    url: row.url,
-    title: row.title,
-    processingStatus: row.processingStatus,
-    createdAt: row.createdAt,
-  };
+  return mapVideoRow(result.rows[0]);
 }
 
 export async function updateVideoProcessingStatus(
@@ -117,9 +107,9 @@ export async function updateVideoProcessingStatus(
 ): Promise<void> {
   await pool.query(
     `
-    UPDATE videos
-    SET processing_status = $1
-    WHERE id = $2
+      UPDATE videos
+      SET processing_status = $1
+      WHERE id = $2
     `,
     [status, videoId],
   );

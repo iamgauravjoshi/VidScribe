@@ -108,5 +108,7 @@ export const config = {
   rag: {
     topK: getNumberEnv('RAG_TOP_K', 3),
     similarityThreshold: getNumberEnv('RAG_SIMILARITY_THRESHOLD', 0.4),
+    chunkSize: getNumberEnv('RAG_CHUNK_SIZE', 2000),
+    chunkOverlap: getNumberEnv('RAG_CHUNK_OVERLAP', 300),
   },
 } as const;

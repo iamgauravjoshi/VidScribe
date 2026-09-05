@@ -599,6 +599,34 @@ query rewriting
 evaluation
 ```
 
+### Better YouTube URL Parsing
+
+A user can refer to the same video using many URLs.
+
+For example:  
+https://www.youtube.com/watch?v=dQw4w9WgXcQ
+https://youtube.com/watch?v=dQw4w9WgXcQ
+https://m.youtube.com/watch?v=dQw4w9WgXcQ
+https://youtu.be/dQw4w9WgXcQ
+https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=120
+https://youtu.be/dQw4w9WgXcQ?t=120
+
+These are all the same video.
+
+Instead:
+
+```
+URL
+ ↓
+extract video ID
+ ↓
+dQw4w9WgXcQ
+ ↓
+database lookup
+```
+
+This is called **canonicalization**.
+
 ## ggggggggg
 
 <!-- -------------------------------------------- -->
@@ -631,4 +659,51 @@ Step 9: Ollama timeout & error handling
 Step 10: Establish video processing lifecycle status (PENDING → PROCESSING → COMPLETED / FAILED)
 Step 11: Duplicate Detection
 Step 12: Transaction-Safe Ingestion
+Step 13 — Better YouTube URL parsing
+Step 14 — Chunk overlap
+Step 15 — Source metadata
+Step 16 — Similarity threshold
+```
+
+```
+                   YouTube URL
+                       │
+                       ▼
+                Extract Video ID
+                       │
+                       ▼
+              ┌─────────────────┐
+              │ PostgreSQL      │
+              │ UNIQUE check    │
+              └────────┬────────┘
+                       │
+              ┌────────┴─────────┐
+              │                  │
+           existing            new
+              │                  │
+              ▼                  ▼
+        check status           PENDING
+              │                  │
+      ┌───────┼───────┐          │
+      │       │       │          ▼
+ COMPLETED PROCESSING FAILED   PROCESSING
+      │       │       │          │
+   return   409     retry        │
+                                  ▼
+                          Generate embeddings
+                              with Ollama
+                                  │
+                                  ▼
+                            BEGIN TRANSACTION
+                                  │
+                          ┌───────┴────────┐
+                          │                │
+                       chunks          COMPLETED
+                          │                │
+                          └───────┬────────┘
+                                  │
+                               COMMIT
+                                  │
+                                  ▼
+                              SUCCESS
 ```

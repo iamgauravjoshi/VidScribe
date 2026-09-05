@@ -42,26 +42,37 @@ app.get('/api/test/error', () => {
 });
 
 // process-video endpoint
-app.post('/api/videos/process', validate(validateProcessVideoRequest), async (req, res) => {
-  try {
-    const { url } = req.body;
+app.post('/api/videos/process', validate(validateProcessVideoRequest), async (req, res, _next) => {
+  const { url } = req.body;
 
-    if (!url) {
-      return res.status(400).json({
-        message: 'YouTube URL is required',
-      });
-    }
-
-    const result = await ingestVideo(url);
-
-    res.json(result);
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: '🚨 Transcript is disabled on this video',
+  if (!url) {
+    return res.status(400).json({
+      message: 'YouTube URL is required',
     });
   }
+
+  const result = await ingestVideo(url);
+
+  res.json(result);
+  // try {
+  //   const { url } = req.body;
+
+  //   if (!url) {
+  //     return res.status(400).json({
+  //       message: 'YouTube URL is required',
+  //     });
+  //   }
+
+  //   const result = await ingestVideo(url);
+
+  //   res.json(result);
+  // } catch (error) {
+  //   console.error(error);
+
+  //   res.status(500).json({
+  //     message: '🚨 Transcript is disabled on this video',
+  //   });
+  // }
 });
 
 // Chat endpoint

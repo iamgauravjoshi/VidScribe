@@ -1,6 +1,21 @@
-// Implementing YouTube transcript extraction
+/*
+Implementing YouTube transcript extraction
+
+youtube-url.service.ts
+    └── URL parsing
+
+youtube.service.ts
+    └── transcript retrieval
+
+video ID
+   ↓
+fetch transcript
+   ↓
+normalize transcript
+*/
 
 import { fetchTranscript } from 'youtube-transcript';
+import { extractYouTubeVideoId } from './youtube-url.service.js';
 import type { TranscriptSegment } from '../../types/transcript.type.js';
 
 interface YouTubeTranscriptResponse {
@@ -19,28 +34,8 @@ export function normalizeTranscript(transcript: YouTubeTranscriptResponse[]): Tr
   }));
 }
 
-export function extractVideoId(url: string): string {
-  const parsedUrl = new URL(url);
-
-  if (parsedUrl.hostname === 'youtu.be') {
-    return parsedUrl.pathname.substring(1);
-  }
-
-  if (parsedUrl.hostname === 'www.youtube.com' || parsedUrl.hostname === 'youtube.com') {
-    const videoId = parsedUrl.searchParams.get('v');
-
-    if (!videoId) {
-      throw new Error('Invalid YouTube URL');
-    }
-
-    return videoId;
-  }
-
-  throw new Error('URL is not a YouTube URL');
-}
-
 export async function getTranscript(url: string) {
-  const videoId = extractVideoId(url);
+  const videoId = extractYouTubeVideoId(url);
   const rawTranscript = await fetchTranscript(videoId, { lang: 'en' });
   const transcript = normalizeTranscript(rawTranscript);
 

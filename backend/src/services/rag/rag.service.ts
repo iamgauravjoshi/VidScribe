@@ -3,29 +3,54 @@
 import { generateEmbedding } from '../embeddings/embedding.service.js';
 import { searchSimilarChunks } from '../vector/vector.service.js';
 import { generateAnswer } from '../llm/ollama.service.js';
+import { config } from '../../shared/config/index.js';
+import { RetrievedChunkRow } from '../../types/chunk.type.js';
+import { logger } from '../../shared/logger/logger.js';
 
 export async function answerQuestion(videoId: number, question: string) {
   // 1. Convert question into vector
   const queryEmbedding = await generateEmbedding(question);
 
   // 2. Search relevant transcript chunks
-  const chunks = await searchSimilarChunks(videoId, queryEmbedding, 3);
+  const chunks = await searchSimilarChunks(videoId, queryEmbedding, config.rag.topK);
 
   // 3. Build context
-  const relevantChunks = chunks.filter((chunk) => chunk.similarity >= 0.4);
+  const relevantChunks = chunks.filter(
+    (chunk) => chunk.similarity >= config.rag.similarityThreshold,
+  );
+
+  logger.info('RAG retrieval completed', {
+    videoId,
+    candidateCount: chunks.length,
+    relevantCount: relevantChunks.length,
+    topK: config.rag.topK,
+    similarityThreshold: config.rag.similarityThreshold,
+    scores: chunks.map((chunk) => ({
+      chunkId: chunk.id,
+      similarity: chunk.similarity,
+    })),
+  });
 
   if (relevantChunks.length === 0) {
     return {
-      answer: {
-        message: {
-          role: 'assistant',
-          content:
-            "I couldn't find enough relevant information in the video to answer that question.",
-        },
-      },
+      answer: "I couldn't find enough relevant information in the video to answer that question.",
+      sources: [],
     };
   }
 
+  // 4. Build prompt
+  const prompt = buildPrompt(question, relevantChunks);
+
+  // 5. Ask LLM
+  const answer = await generateAnswer(prompt);
+
+  return {
+    answer,
+    sources: relevantChunks,
+  };
+}
+
+function buildPrompt(question: String, relevantChunks: RetrievedChunkRow[]) {
   const context = relevantChunks
     .map(
       (chunk: any, index: number) =>
@@ -37,7 +62,6 @@ export async function answerQuestion(videoId: number, question: string) {
     )
     .join('\n');
 
-  // 4. Build prompt
   const prompt = `
     You are an AI assistant that answers questions
     about a YouTube video.
@@ -56,11 +80,5 @@ export async function answerQuestion(videoId: number, question: string) {
     USER QUESTION: ${question}
   `;
 
-  // 5. Ask LLM
-  const answer = await generateAnswer(prompt);
-
-  return {
-    answer,
-    sources: chunks,
-  };
+  return prompt;
 }

@@ -7,13 +7,31 @@ import { config } from '../../shared/config/index.js';
 import type { RetrievedChunkRow } from '../../types/chunk.type.js';
 import { logger } from '../../shared/logger/logger.js';
 import type { AnswerResult } from '../../types/chat.type.js';
+import type { RequestTraceContext } from '../../types/observability.type.js';
 
-export async function answerQuestion(sourceId: number, question: string): Promise<AnswerResult> {
-  const relevantChunks = await searchSourceChunksByText(sourceId, question, config.rag.topK);
+export async function answerQuestion(
+  trace: RequestTraceContext,
+  question: string,
+): Promise<AnswerResult> {
+  const retrievalStartedAt = Date.now();
+  let relevantChunks: RetrievedChunkRow[];
+
+  try {
+    relevantChunks = await searchSourceChunksByText(trace.sourceId, question, config.rag.topK);
+  } catch (error: unknown) {
+    logger.error('RAG retrieval failed', {
+      ...trace,
+      retrieval: 'postgres_full_text',
+      durationMs: Date.now() - retrievalStartedAt,
+      errorCode: 'RETRIEVAL_FAILED',
+    });
+    throw error;
+  }
 
   logger.info('RAG retrieval completed', {
-    sourceId,
+    ...trace,
     retrieval: 'postgres_full_text',
+    durationMs: Date.now() - retrievalStartedAt,
     candidateCount: relevantChunks.length,
     relevantCount: relevantChunks.length,
     topK: config.rag.topK,
@@ -36,7 +54,7 @@ export async function answerQuestion(sourceId: number, question: string): Promis
   const prompt = buildPrompt(question, relevantChunks);
 
   // 5. Ask LLM
-  const generation = await generateAnswer(prompt);
+  const generation = await generateAnswer(prompt, trace);
 
   return {
     answer: generation.text,
@@ -48,8 +66,9 @@ export async function answerQuestion(sourceId: number, question: string): Promis
 
 function buildPrompt(question: string, relevantChunks: RetrievedChunkRow[]) {
   const context = relevantChunks
-    .map((chunk, index) =>
-      `
+    .map(
+      (chunk, index) =>
+        `
             SOURCE ${index + 1}
             Timestamp: ${chunk.start_seconds} - ${chunk.end_seconds}
             Content: ${chunk.content}

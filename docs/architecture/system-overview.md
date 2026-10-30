@@ -4,21 +4,22 @@ This document describes the system that is implemented today. Product goals and 
 
 ## Components
 
-| Component | Responsibility |
-| --- | --- |
-| React application | Library navigation, source lifecycle states, retry/removal, question composer, answer and citation display. |
-| Express API | Validates requests, serializes DTOs, exposes source lifecycle and conversation endpoints, and reports dependency health. |
-| AI settings service/repository | Tests provider credentials/models, stores the selected answer provider/model and encrypted credentials, and returns only safe status/configuration fields to the UI. |
-| Source service/repository | Canonicalizes YouTube identity, creates or returns the source/job atomically, and reads or mutates library state. |
-| Conversation service/repository | Persists one conversation per source, claims idempotent answer turns, tracks pending/failure state, and stores answer citations using fenced writes. |
-| PostgreSQL worker loop | Claims queued or expired jobs with row locking, tracks phases and lease ownership, and triggers ingestion. It runs in each backend process. |
-| YouTube adapter | Parses supported YouTube URLs and fetches English transcript segments. |
-| Ingestion service | Coordinates caption retrieval, chunking, lease checks, and atomic local full-text index publication. |
-| Full-text retrieval repository | Uses a PostgreSQL GIN expression index and source-scoped rank query to find transcript passages locally. |
-| LLM provider registry/adapters | Dispatches answer generation to the selected Gemini, OpenAI, Anthropic Claude, or Ollama adapter. Cloud keys are decrypted only in the backend process immediately before a request. |
-| Local secret store | Creates/loads the per-user AES-256-GCM key outside the repository and encrypts cloud credentials before database persistence. |
-| Citation service | Maps matched transcript chunks to source/timestamp citations. |
-| PostgreSQL | Durable source/job state, transcript chunks, GIN full-text index, conversations, messages, and migration history. The legacy pgvector column/extension remain to preserve old stored data, but current retrieval does not use them. |
+| Component                       | Responsibility                                                                                                                                                                                                                      |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| React application               | Library navigation, source lifecycle states, retry/removal, question composer, answer and citation display.                                                                                                                         |
+| Express API                     | Validates requests, serializes DTOs, exposes source lifecycle and conversation endpoints, and reports dependency health.                                                                                                            |
+| Request context middleware      | Assigns a server-side request UUID, returns `X-Request-Id`, and logs route/status/total duration without request bodies or query strings.                                                                                           |
+| AI settings service/repository  | Tests provider credentials/models, stores the selected answer provider/model and encrypted credentials, and returns only safe status/configuration fields to the UI.                                                                |
+| Source service/repository       | Canonicalizes YouTube identity, creates or returns the source/job atomically, and reads or mutates library state.                                                                                                                   |
+| Conversation service/repository | Persists one conversation per source, claims idempotent answer turns, tracks pending/failure state, and stores answer citations using fenced writes.                                                                                |
+| PostgreSQL worker loop          | Claims queued or expired jobs with row locking, tracks phases and lease ownership, and triggers ingestion. It runs in each backend process.                                                                                         |
+| YouTube adapter                 | Parses supported YouTube URLs and fetches English transcript segments.                                                                                                                                                              |
+| Ingestion service               | Coordinates caption retrieval, chunking, lease checks, and atomic local full-text index publication.                                                                                                                                |
+| Full-text retrieval repository  | Uses a PostgreSQL GIN expression index and source-scoped rank query to find transcript passages locally.                                                                                                                            |
+| LLM provider registry/adapters  | Dispatches answer generation to the selected Gemini, OpenAI, Anthropic Claude, or Ollama adapter. Cloud keys are decrypted only in the backend process immediately before a request.                                                |
+| Local secret store              | Creates/loads the per-user AES-256-GCM key outside the repository and encrypts cloud credentials before database persistence.                                                                                                       |
+| Citation service                | Maps matched transcript chunks to source/timestamp citations.                                                                                                                                                                       |
+| PostgreSQL                      | Durable source/job state, transcript chunks, GIN full-text index, conversations, messages, and migration history. The legacy pgvector column/extension remain to preserve old stored data, but current retrieval does not use them. |
 
 ## Data flow
 
@@ -47,6 +48,8 @@ sequenceDiagram
 
 Question submission remains synchronous through RAG, but its state is durable. The API commits a user message and pending assistant message under a per-source conversation lock, then runs local PostgreSQL retrieval and chat inference outside a database transaction. A fenced completion transaction stores the answer and citations. The UI restores messages from `GET /conversation`, polls pending answers, and can safely resubmit an expired turn with the same UUID.
 
+Each HTTP attempt gets a new correlation UUID. The client turn UUID remains stable across retries and represents idempotency; chat logs carry both IDs through claim, retrieval, provider inference, persistence, and response completion. Stage timings can be joined by request ID without logging questions, transcript text, prompts, credentials, or raw URLs.
+
 Provider configuration follows a separate flow: the backend makes a short generation request with the proposed model/key; only after it succeeds does a short transaction save the encrypted credential/model and activate that provider. Light/dark appearance is stored locally by the browser and does not call the API.
 
 ```mermaid
@@ -54,6 +57,7 @@ sequenceDiagram
   actor User
   participant UI as React UI
   participant API as Express API
+  participant Trace as Request context middleware
   participant Conversation as Conversation service
   participant DB as PostgreSQL
   participant RAG
@@ -63,6 +67,7 @@ sequenceDiagram
 
   User->>UI: Submit question + client turn UUID
   UI->>API: POST /sources/:id/chat
+  API->>Trace: Generate request UUID and start timer
   API->>Conversation: Validate source readiness and claim turn
   Conversation->>DB: Lock conversation; insert user + PENDING assistant
   DB-->>Conversation: Commit IDs + generation lease
@@ -115,6 +120,6 @@ Vite proxies `/api` during development. Production serving/reverse proxying is n
 - Process crash during answer generation: the row stays pending until lease expiry. A user can resume it on return; there is no separate answer worker yet.
 - Answer commit failure after successful inference: the turn may be generated again after lease expiry; durable completion remains single-writer and idempotent, while model execution is at-least-once.
 
-See [the job decision](../decisions/postgres-backed-ingestion-jobs.md), [persisted chat decision](../decisions/persisted-conversations-and-idempotent-turns.md), [provider/key decision](../decisions/multi-provider-generation-and-key-storage.md), [chat service guide](../services/chat-conversation-service.md), and [LLM provider service guide](../services/llm-provider-service.md) for concrete scenarios and trade-offs.
+See [the job decision](../decisions/postgres-backed-ingestion-jobs.md), [persisted chat decision](../decisions/persisted-conversations-and-idempotent-turns.md), [provider/key decision](../decisions/multi-provider-generation-and-key-storage.md), [chat observability/retrieval evaluation decision](../decisions/chat-observability-and-retrieval-evaluation.md), [request context guide](../services/request-context.md), [chat service guide](../services/chat-conversation-service.md), and [LLM provider service guide](../services/llm-provider-service.md) for concrete scenarios and trade-offs.
 
 See the [local PostgreSQL full-text retrieval decision](../decisions/local-postgres-full-text-retrieval.md) for the privacy/quality trade-off and the [usage telemetry decision](../decisions/provider-usage-telemetry.md) for provider measurement limits.

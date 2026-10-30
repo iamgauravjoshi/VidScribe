@@ -38,7 +38,7 @@ Retrieval uses one read statement and requires no transaction beyond the stateme
 
 ## Testing strategy
 
-The disposable PostgreSQL integration test verifies nullable-vector inserts, English stemming/matching, positive ranks, stopword-only no-match, source isolation, and atomic replacement. Add a labeled retrieval evaluation set before tuning OR matching, ranking, chunk size, or a future semantic fallback. Provider calls are mocked in adapter tests and are not needed to test retrieval.
+The disposable PostgreSQL integration test verifies nullable-vector inserts, English stemming/matching, positive ranks, stopword-only no-match, source isolation, atomic replacement, and the four-case labeled `Recall@3` baseline. It also checks timestamp citations map to the exact retrieved source chunks. Provider calls are not needed to test retrieval; keep retrieval quality cases deterministic and provider-free before tuning OR matching, ranking, chunk size, or a future semantic fallback.
 
 ## Future evolution
 

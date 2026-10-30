@@ -8,6 +8,7 @@ import { logger } from '../../shared/logger/index.js';
 import { getLocalSecretEncryptionKey } from '../../shared/secrets/local-key-store.js';
 import { decryptSecret } from '../../shared/secrets/secret-cipher.js';
 import type { GeneratedText, LlmProviderId } from '../../types/llm.type.js';
+import type { RequestTraceContext } from '../../types/observability.type.js';
 import { getLlmProvider } from './provider-registry.js';
 
 export interface ActiveGenerationSettings {
@@ -30,7 +31,10 @@ export async function getActiveGenerationSettings(): Promise<ActiveGenerationSet
   };
 }
 
-export async function generateAnswer(prompt: string): Promise<GeneratedText> {
+export async function generateAnswer(
+  prompt: string,
+  trace: RequestTraceContext,
+): Promise<GeneratedText> {
   const settings = await getActiveGenerationSettings();
   const adapter = getLlmProvider(settings.provider);
 
@@ -59,6 +63,7 @@ export async function generateAnswer(prompt: string): Promise<GeneratedText> {
 
   const startedAt = Date.now();
   logger.info('AI answer generation started', {
+    ...trace,
     provider: settings.provider,
     modelId: settings.modelId,
     timeoutMs: config.ai.requestTimeoutMs,
@@ -74,6 +79,7 @@ export async function generateAnswer(prompt: string): Promise<GeneratedText> {
     });
   } catch (error: unknown) {
     logger.error('AI answer generation failed', {
+      ...trace,
       provider: settings.provider,
       modelId: settings.modelId,
       durationMs: Date.now() - startedAt,
@@ -83,6 +89,7 @@ export async function generateAnswer(prompt: string): Promise<GeneratedText> {
   }
 
   logger.info('AI answer generation completed', {
+    ...trace,
     provider: settings.provider,
     modelId: settings.modelId,
     durationMs: Date.now() - startedAt,

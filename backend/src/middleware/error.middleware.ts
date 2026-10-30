@@ -2,6 +2,7 @@ import type { ErrorRequestHandler, Request } from 'express';
 
 import { AppError, ErrorCode } from '../shared/errors/index.js';
 import { logger } from '../shared/logger/index.js';
+import { getRequestOperation } from './request-context.middleware.js';
 
 /**
  * Standard API error response.
@@ -51,8 +52,9 @@ export const errorMiddleware: ErrorRequestHandler = (error, req: Request, res, _
    * because it may contain internal implementation details.
    */
   logger.error('Unhandled application error', {
+    requestId: res.locals.requestId,
     method: req.method,
-    path: req.originalUrl,
+    operation: getRequestOperation(req),
     error: error instanceof Error ? error.message : String(error),
   });
 

@@ -1,4 +1,10 @@
-import { beginAnswerTurn, completeAnswerTurn, failAnswerTurn, getConversationForSource, renewAnswerLease } from '../../repositories/conversation.repository.js';
+import {
+  beginAnswerTurn,
+  completeAnswerTurn,
+  failAnswerTurn,
+  getConversationForSource,
+  renewAnswerLease,
+} from '../../repositories/conversation.repository.js';
 import { getSource } from '../sources/source.service.js';
 import { answerQuestion } from '../rag/rag.service.js';
 import { config } from '../../shared/config/index.js';
@@ -7,6 +13,7 @@ import { logger } from '../../shared/logger/index.js';
 import type { AnswerCitation } from '../../types/chat.type.js';
 import type { ConversationDto } from '../../types/conversation.type.js';
 import type { LlmProviderId } from '../../types/llm.type.js';
+import type { RequestTraceContext } from '../../types/observability.type.js';
 import { toConversationMessageDto } from '../../types/conversation.type.js';
 import { SourceStatus } from '../../types/source.type.js';
 
@@ -35,7 +42,11 @@ class AnswerLeaseLostError extends Error {
   }
 }
 
-function classifyAnswerFailure(error: unknown): { code: string; message: string; retryable: boolean } {
+function classifyAnswerFailure(error: unknown): {
+  code: string;
+  message: string;
+  retryable: boolean;
+} {
   if (error instanceof AppError) {
     return {
       code: error.code,
@@ -50,12 +61,17 @@ function classifyAnswerFailure(error: unknown): { code: string; message: string;
 
   return {
     code: 'ANSWER_GENERATION_FAILED',
-    message: 'The answer could not be generated. Check your provider settings and connection, then try again.',
+    message:
+      'The answer could not be generated. Check your provider settings and connection, then try again.',
     retryable: true,
   };
 }
 
-function startAnswerLeaseHeartbeat(messageId: number, leaseToken: string) {
+function startAnswerLeaseHeartbeat(
+  messageId: number,
+  leaseToken: string,
+  trace: RequestTraceContext,
+) {
   const leaseDurationMs = config.chat.generationLeaseDurationMs;
   const intervalMs = Math.max(100, Math.floor(leaseDurationMs / 3));
   let leaseLost = false;
@@ -71,6 +87,7 @@ function startAnswerLeaseHeartbeat(messageId: number, leaseToken: string) {
       .catch((error: unknown) => {
         leaseLost = true;
         logger.warn('Chat answer lease renewal failed', {
+          ...trace,
           assistantMessageId: messageId,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -126,7 +143,14 @@ export async function askSourceQuestion(input: {
   sourceId: number;
   turnId: string;
   question: string;
+  requestId: string;
 }): Promise<AnswerTurnResponse> {
+  const trace: RequestTraceContext = {
+    requestId: input.requestId,
+    sourceId: input.sourceId,
+    turnId: input.turnId,
+  };
+  const claimStartedAt = Date.now();
   const source = await getSource(input.sourceId);
 
   if (source.status !== SourceStatus.READY) {
@@ -141,6 +165,13 @@ export async function askSourceQuestion(input: {
   const claim = await beginAnswerTurn({
     ...input,
     leaseDurationMs: config.chat.generationLeaseDurationMs,
+  });
+
+  logger.info('Chat answer turn claim resolved', {
+    ...trace,
+    sourceStatus: source.status,
+    outcome: claim?.kind ?? 'missing',
+    turnClaimFlowDurationMs: Date.now() - claimStartedAt,
   });
 
   if (!claim) {
@@ -166,13 +197,14 @@ export async function askSourceQuestion(input: {
     };
   }
 
-  const heartbeat = startAnswerLeaseHeartbeat(claim.assistantMessageId, claim.leaseToken);
+  const heartbeat = startAnswerLeaseHeartbeat(claim.assistantMessageId, claim.leaseToken, trace);
   const startedAt = Date.now();
 
   try {
-    const result = await answerQuestion(input.sourceId, input.question);
+    const result = await answerQuestion(trace, input.question);
     heartbeat.assertOwned();
 
+    const persistenceStartedAt = Date.now();
     const committed = await completeAnswerTurn({
       messageId: claim.assistantMessageId,
       leaseToken: claim.leaseToken,
@@ -187,12 +219,12 @@ export async function askSourceQuestion(input: {
     }
 
     logger.info('Chat answer persisted', {
-      sourceId: input.sourceId,
-      turnId: input.turnId,
+      ...trace,
       assistantMessageId: claim.assistantMessageId,
       citationCount: result.citations.length,
       providerId: result.providerId,
       modelId: result.modelId,
+      persistenceDurationMs: Date.now() - persistenceStartedAt,
       durationMs: Date.now() - startedAt,
     });
 
@@ -209,8 +241,7 @@ export async function askSourceQuestion(input: {
   } catch (error: unknown) {
     if (error instanceof AnswerLeaseLostError) {
       logger.warn('Chat answer discarded after generation lease was lost', {
-        sourceId: input.sourceId,
-        turnId: input.turnId,
+        ...trace,
         assistantMessageId: claim.assistantMessageId,
       });
       throw new AppError(
@@ -232,8 +263,7 @@ export async function askSourceQuestion(input: {
 
       if (recorded) {
         logger.error('Chat answer generation failed', {
-          sourceId: input.sourceId,
-          turnId: input.turnId,
+          ...trace,
           assistantMessageId: claim.assistantMessageId,
           errorCode: failure.code,
           retryable: failure.retryable,
@@ -241,15 +271,13 @@ export async function askSourceQuestion(input: {
         });
       } else {
         logger.warn('Chat answer failure ignored because the lease is no longer owned', {
-          sourceId: input.sourceId,
-          turnId: input.turnId,
+          ...trace,
           assistantMessageId: claim.assistantMessageId,
         });
       }
     } catch (recordError: unknown) {
       logger.error('Could not persist chat answer failure', {
-        sourceId: input.sourceId,
-        turnId: input.turnId,
+        ...trace,
         originalError: failure.message,
         recordError: recordError instanceof Error ? recordError.message : String(recordError),
       });

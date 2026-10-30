@@ -46,12 +46,12 @@ The active provider is global because the current product boundary is a single-u
 
 ## Supported providers and initial models
 
-| Provider | Initial model ID | Request boundary |
-| --- | --- | --- |
-| Gemini | `gemini-3.8-flash` | Gemini `generateContent` REST API |
-| OpenAI | `gpt-6-luna` | OpenAI Responses API |
-| Claude | `claude-sonnet-5-5` | Anthropic Messages API |
-| Ollama | Value of `OLLAMA_CHAT_MODEL` | Local Ollama chat API |
+| Provider | Initial model ID             | Request boundary                  |
+| -------- | ---------------------------- | --------------------------------- |
+| Gemini   | `gemini-3.8-flash`           | Gemini `generateContent` REST API |
+| OpenAI   | `gpt-6-luna`                 | OpenAI Responses API              |
+| Claude   | `claude-sonnet-5-5`          | Anthropic Messages API            |
+| Ollama   | Value of `OLLAMA_CHAT_MODEL` | Local Ollama chat API             |
 
 Every model ID can be changed in AI settings. The API does not query vendor model catalogs, so a valid key does not guarantee that the selected model is available to that account. Check the current provider model catalog if a request reports an invalid model. Provider API request formats are documented in the [Gemini API reference](https://ai.google.dev/api), [OpenAI Responses API reference](https://developers.openai.com/api/reference/cli/resources/responses/methods/create), and [Claude Messages API reference](https://platform.claude.com/docs/en/api/http).
 
@@ -63,7 +63,7 @@ Every model ID can be changed in AI settings. The API does not query vendor mode
 4. Otherwise, RAG builds the grounded prompt and calls `llm.service`.
 5. The LLM service resolves the active provider/model. If a required key is missing, it returns a safe configuration error rather than falling back.
 6. The encrypted key is decrypted with the local key store; one provider adapter makes a non-streaming HTTP request under `AI_REQUEST_TIMEOUT_MS`.
-7. The adapter validates the response shape and returns answer text plus normalized usage when the provider supplies it. `llm.service` logs provider latency and token counts; provider/model provenance is returned to RAG and persisted with the answer and citations under the current turn fencing token.
+7. The adapter validates the response shape and returns answer text plus normalized usage when the provider supplies it. `llm.service` logs provider latency and token counts with request, source, and turn IDs; provider/model provenance is returned to RAG and persisted with the answer and citations under the current turn fencing token.
 8. A retryable safe failure is persisted on the assistant row; the original user question stays in history.
 
 No PostgreSQL transaction is open while calling Ollama or a cloud provider. A provider switch affects new generation resolution; completed messages retain their provenance and content. Token usage is not persisted with messages, aggregated, or converted to currency. Missing usage metadata does not fail an otherwise valid answer.
@@ -78,17 +78,17 @@ No key is intentionally included in application logs or provider failure message
 
 ## Error handling
 
-| Condition | Behavior |
-| --- | --- |
-| Provider not configured | Refuse generation with a safe settings error; no fallback. |
-| Local encryption key missing/corrupt or decryption fails | Return `AI_PROVIDER_KEY_UNAVAILABLE`; ask the user to restore the local key or re-enter a provider key. |
-| Provider returns 401/403 | Return a sanitized authentication failure and direct the user to replace the key. |
-| Provider returns 429 | Surface a rate-limit message and allow explicit retry where chat policy permits. |
-| Provider returns 5xx/network failure | Map to unavailable/request failure; preserve the user question and do not automatically retry. |
-| Request timeout | Abort the HTTP call and return a stable timeout error. |
-| Malformed/empty response | Return an invalid-response error; do not persist partial output. |
-| Database save succeeds but UI response is lost | Re-fetch settings; an optional key is not sent back, and a repeated save with no key preserves the stored credential. |
-| Generation succeeds but message completion commit fails | Existing chat lease/idempotency rules can re-run model work after lease expiry; only the current generation token may publish. |
+| Condition                                                | Behavior                                                                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Provider not configured                                  | Refuse generation with a safe settings error; no fallback.                                                                     |
+| Local encryption key missing/corrupt or decryption fails | Return `AI_PROVIDER_KEY_UNAVAILABLE`; ask the user to restore the local key or re-enter a provider key.                        |
+| Provider returns 401/403                                 | Return a sanitized authentication failure and direct the user to replace the key.                                              |
+| Provider returns 429                                     | Surface a rate-limit message and allow explicit retry where chat policy permits.                                               |
+| Provider returns 5xx/network failure                     | Map to unavailable/request failure; preserve the user question and do not automatically retry.                                 |
+| Request timeout                                          | Abort the HTTP call and return a stable timeout error.                                                                         |
+| Malformed/empty response                                 | Return an invalid-response error; do not persist partial output.                                                               |
+| Database save succeeds but UI response is lost           | Re-fetch settings; an optional key is not sent back, and a repeated save with no key preserves the stored credential.          |
+| Generation succeeds but message completion commit fails  | Existing chat lease/idempotency rules can re-run model work after lease expiry; only the current generation token may publish. |
 
 The provider adapters currently do not implement automatic retries or circuit breakers. This avoids multiplying billed requests and leaves retry semantics under explicit user control.
 

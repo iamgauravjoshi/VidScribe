@@ -37,8 +37,10 @@ The current migration creates the GIN index in a transaction and is suitable for
 
 ## Testing strategy
 
-Use the isolated PostgreSQL integration database, not mocks, to verify the actual `tsvector`/`tsquery` semantics and GIN expression. Cover stemming, OR matching, no searchable terms, source isolation, rank ordering, and behavior when new chunks have no embedding. A populated legacy fixture should confirm migration preserves old vectors while making their text searchable.
+Use the isolated PostgreSQL integration database, not mocks, to verify the actual `tsvector`/`tsquery` semantics and GIN expression. Cover stemming, OR matching, no searchable terms, source isolation, rank ordering, and behavior when new chunks have no embedding. The versioned retrieval fixture in `backend/test/fixtures/retrieval-evaluation.ts` adds four labeled questions over a synthetic transcript and asserts the current `Recall@3` baseline of 0.75. One paraphrase case deliberately records the known lexical miss. For each retrieved expected chunk, the integration test verifies citation excerpt, source video ID, and start/end timestamps. A populated legacy fixture should confirm migration preserves old vectors while making their text searchable.
+
+This is a deterministic SQL/retrieval/citation regression check. It does not evaluate generated answer correctness, retrieval on user transcripts, cross-language behavior, or production search quality. Keep expected chunks human-labeled and expand the corpus with representative examples before changing ranking or adding semantic retrieval.
 
 ## Future evolution
 
-Add language metadata before indexing non-English text. Add labeled retrieval evaluation and user feedback before changing ranking. Hybrid semantic search can be added later as a separate strategy with model/version metadata and an explicit transcript transfer policy; it should not silently replace local FTS.
+Add language metadata before indexing non-English text. Expand the labeled evaluation corpus and collect user feedback before changing ranking. Hybrid semantic search can be added later as a separate strategy with model/version metadata and an explicit transcript transfer policy; it should not silently replace local FTS.

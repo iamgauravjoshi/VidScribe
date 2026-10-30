@@ -209,11 +209,6 @@ Backend TypeScript build passed. Provider adapter tests cover usage parsing and 
 - [Ollama chat API response usage counters](https://docs.ollama.com/api/chat)
 - [Provider service guide](../services/llm-provider-service.md#generation-flow)
 
-## Next architecture changes to consider
-
-1. The local retrieval choice is resolved in the 2026-10-30 entry below. A real answer still needs a configured Gemini key and a READY source.
-2. Add durable request-correlated usage only if historical usage or cost estimates are a product need; add bounded concurrency or asynchronous generation only when measurements and recovery requirements justify them.
-
 ## 2026-10-30 — Local PostgreSQL full-text retrieval without Ollama
 
 ### Previous approach
@@ -249,12 +244,6 @@ Backend and frontend builds passed. The isolated PostgreSQL suite passed all 13 
 - [Local retrieval decision](../decisions/local-postgres-full-text-retrieval.md)
 - [PostgreSQL full-text search service](../services/postgres-full-text-search.md)
 - [Project guide](../PROJECT.md#reliability-boundaries-and-known-limits)
-
-## Next architecture changes to consider
-
-1. Save the Gemini key in the masked settings UI and add a public video with English captions, then verify one real answer.
-2. Use measured end-to-end/provider latency and normalized token usage to decide whether to add cost tracking, model concurrency limits, streaming, or background generation.
-3. Add a labeled retrieval evaluation before tuning lexical ranking or introducing a semantic fallback.
 
 ## 2026-10-30 — Unified AI settings, test-before-save, and appearance preference
 
@@ -313,15 +302,56 @@ CSS variables are not statically type checked. Keep the set small, document sema
 - [VidScribe design system](../../DESIGN.md)
 - [Design token decision](../decisions/semantic-design-tokens.md)
 
+## 2026-10-30 — Correlate answer requests and establish a retrieval baseline
+
+### Previous approach
+
+Provider and RAG events logged their own duration, while the API logged unhandled failures. A chat turn UUID was persisted for idempotency, but no server-generated ID connected HTTP completion, retrieval, provider generation, and answer persistence. PostgreSQL integration covered full-text retrieval and source isolation with a small number of assertions, not a labeled multi-query baseline.
+
+### Problem discovered
+
+The user manually verified provider-backed answers, but this only proves that the integration path can work. It does not show whether the right evidence is retrieved, whether citations retain correct timestamps, or which stage accounts for latency. A turn UUID must remain stable across retries; using it as a request trace ID would hide separate HTTP attempts.
+
+### New approach
+
+- Generate a fresh server-side UUID for every HTTP request, return it as `X-Request-Id`, and log a safe operation name, status, and duration at response completion.
+- Propagate request ID, source ID, and durable turn ID through chat claim, PostgreSQL retrieval, provider generation, persistence, and failure logs. Do not log query strings, questions, transcript passages, prompts, or credentials.
+- Record a versioned synthetic retrieval fixture with four labeled questions, `Recall@3` threshold 0.75, expected citation mapping, and one deliberate lexical paraphrase miss. Run it against PostgreSQL in the isolated integration suite; it makes no AI-provider call.
+- Document that user-reported provider tests succeeded, while exact model/latency/token results remain unavailable until recorded.
+
+### Why this is better
+
+Each HTTP attempt can be traced independently, while turn ID joins retries that refer to one saved logical question. Stage timings show time spent in claim, retrieval, provider inference, answer persistence, and the complete HTTP request. The evaluation turns the known lexical-search trade-off into a repeatable baseline before ranking changes or a semantic-search proposal.
+
+### Trade-offs and deferred work
+
+The request ID exists only in logs and the response header; there is no tracing backend or durable metrics store. Logs can be rotated, and a synthetic four-query corpus is not representative of real transcripts, answer quality, or production distribution. The test checks retrieval labels and citation construction, not whether an LLM's prose is factually correct. No schema migration or provider call is introduced.
+
+### References
+
+- [Chat observability and retrieval evaluation decision](../decisions/chat-observability-and-retrieval-evaluation.md)
+- [Request context middleware guide](../services/request-context.md)
+- [PostgreSQL full-text search guide](../services/postgres-full-text-search.md)
+- [Project guide](../PROJECT.md#reliability-boundaries-and-known-limits)
+
+## Next phase recommendation
+
+The user has verified provider-backed answer generation, but no exact provider/model latency or token usage was captured. The current phase adds per-request stage timings and a synthetic PostgreSQL retrieval baseline. Next, record a small set of representative real-source question timings and provider usage (which may incur provider charges), then decide whether latency, capacity, or historical usage is the next product need. Do not infer cost from token counts without a versioned pricing policy.
+
 ## Change entry template
 
 ```markdown
 ## YYYY-MM-DD — Short change name
 
 ### Previous approach
+
 ### Problem discovered
+
 ### New approach
+
 ### Why this is better
+
 ### Trade-offs and deferred work
+
 ### References
 ```

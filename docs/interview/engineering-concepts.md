@@ -90,9 +90,9 @@ The worker records a safe failure code/message and whether retry is allowed. You
 
 **Short answer:** It provides a measured baseline for a real request without presenting a fragile estimate as a bill or committing to an unused usage ledger.
 
-**Deep answer:** Gemini, OpenAI, Anthropic, and Ollama expose usage through different response fields. Adapters normalize those into input/output/total and provider-specific cache or reasoning fields. The LLM service logs usage beside provider latency; conversation persistence separately records the full turn duration. The answer still succeeds if a provider omits usage metadata. Current logs are operational and can be lost; they have no end-to-end request correlation and are not appropriate for billing or aggregate concurrency decisions.
+**Deep answer:** Gemini, OpenAI, Anthropic, and Ollama expose usage through different response fields. Adapters normalize those into input/output/total and provider-specific cache or reasoning fields. The LLM service logs usage beside provider latency; conversation persistence and HTTP middleware record wider stage durations. A fresh request ID correlates one attempt, while the turn ID groups retries. The answer still succeeds if a provider omits usage metadata. Logs can be lost and are not appropriate for billing or aggregate concurrency decisions.
 
-**Failure/concurrency:** A valid response without usage fields remains usable. If an answer call is repeated after a persistence failure, each provider request may incur usage even when only one answer is ultimately saved. Concurrent log events cannot yet be joined reliably across retrieval, generation, and persistence.
+**Failure/concurrency:** A valid response without usage fields remains usable. If an answer call is repeated after a persistence failure, each provider request may incur usage even when only one answer is ultimately saved. Request and turn IDs make separate attempts distinguishable, but local logs do not provide durable percentiles or a capacity metric.
 
 **Follow-up:** Persist per-turn usage when users need history or quota policy. Before cost estimates, add versioned provider pricing and explicit rules for cache/reasoning token classes. Before capacity claims, add request-correlated durable metrics.
 
@@ -117,13 +117,25 @@ The short transaction commits the user question and pending assistant placeholde
 - Execute PostgreSQL integration tests for migrations, competing claims, expiry/reclaim, stale-token fencing, rollback, chat idempotency, and cascade deletion on a disposable database.
 - A transcript timeout/cancellation contract, bounded worker/model concurrency, and explicit graceful-shutdown deadline.
 - A durable background answer worker if measured HTTP wait times or abandoned-request recovery needs justify asynchronous execution.
-- Metrics, request/job correlation, traces, operational alerts, and backup/restore procedures.
+- Durable metrics, distributed traces, operational alerts, and backup/restore procedures. Local HTTP request correlation now exists, but it is not an observability backend.
 - Authentication and ownership before supporting remote or multi-user access.
 - Retrieval evaluation and measured vector indexing decisions.
 
 See [provider usage telemetry without a billing ledger](../decisions/provider-usage-telemetry.md) for the current boundary and interview explanation.
 
 The current system is a reliable local-first vertical slice with explicit failure boundaries; it is not yet an operated multi-user production service.
+
+## Why separate the chat turn ID from the request ID?
+
+The client turn UUID is an idempotency key for one logical question and remains the same if the browser retries. The server generates a fresh request UUID for every HTTP attempt and returns it as `X-Request-Id`. Logs carry both values: the request ID joins claim, retrieval, provider, persistence, and HTTP timings for one attempt; the turn ID groups retries of the same saved answer. Neither ID carries authorization, and no question, transcript, prompt, key, or raw URL is logged.
+
+This is a local structured-log correlation mechanism, not distributed tracing. If VidScribe moves to multiple services, propagate W3C trace context and export spans to an OpenTelemetry backend.
+
+## What does the retrieval evaluation prove?
+
+The isolated PostgreSQL integration test uses a small human-labeled synthetic transcript. It checks that three lexical questions retrieve expected chunk IDs in the top three, records one expected paraphrase miss, and validates the citation excerpt, source video ID, and timestamp URL generated from retrieved rows. It does not call an LLM.
+
+This protects SQL/search semantics and citation mapping from regressions. It does not show that real user transcripts are retrieved well, that model answers are factually correct, or that a semantic index is justified. Those claims require a larger representative corpus, answer-quality review, and explicit privacy/cost decisions.
 
 ## Why test provider credentials before saving them?
 

@@ -15,7 +15,7 @@
     "db:migrate:prod": "node dist/db/migrate.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "tsx --test test/chunk.service.test.ts test/youtube-url.service.test.ts test/request-validation.test.ts test/llm-providers.test.ts test/secret-cipher.test.ts test/postgres-lifecycle.integration.test.ts"
+    "test": "tsx --test test/chunk.service.test.ts test/youtube-url.service.test.ts test/request-validation.test.ts test/request-context.middleware.test.ts test/llm-providers.test.ts test/secret-cipher.test.ts test/postgres-lifecycle.integration.test.ts"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

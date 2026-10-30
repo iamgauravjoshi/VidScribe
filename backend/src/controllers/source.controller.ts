@@ -4,7 +4,13 @@ import {
   askSourceQuestion as generateSourceAnswer,
   getSourceConversation,
 } from '../services/chat/conversation.service.js';
-import { addSource, getSource, getSources, removeSource, retrySource } from '../services/sources/source.service.js';
+import {
+  addSource,
+  getSource,
+  getSources,
+  removeSource,
+  retrySource,
+} from '../services/sources/source.service.js';
 import { toSourceDto } from '../types/source.type.js';
 
 export async function createSource(req: Request, res: Response): Promise<void> {
@@ -47,10 +53,16 @@ export async function deleteSource(req: Request, res: Response): Promise<void> {
 
 export async function askSourceQuestion(req: Request, res: Response): Promise<void> {
   const sourceId = Number(req.params.sourceId);
+  const turnId = req.body.requestId as string;
+  const requestId = res.locals.requestId as string;
+  res.locals.sourceId = sourceId;
+  res.locals.turnId = turnId;
+
   const turn = await generateSourceAnswer({
     sourceId,
-    turnId: req.body.requestId as string,
+    turnId,
     question: req.body.question as string,
+    requestId,
   });
 
   res.status(turn.status === 'PENDING' ? 202 : 200).json({ turn });

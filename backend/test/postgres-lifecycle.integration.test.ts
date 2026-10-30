@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, test } from 'node:test';
+import { RETRIEVAL_EVALUATION } from './fixtures/retrieval-evaluation.js';
 
 const testDatabaseUrl = process.env.VIDSCRIBE_TEST_DATABASE_URL;
 let closePool: (() => Promise<void>) | undefined;
@@ -26,7 +27,16 @@ test(
     // explicitly supplied disposable database URL.
     process.env.NODE_ENV = 'test';
 
-    const [database, migrations, transaction, sources, jobs, conversations, aiSettingsRepository, aiSettingsService] = await Promise.all([
+    const [
+      database,
+      migrations,
+      transaction,
+      sources,
+      jobs,
+      conversations,
+      aiSettingsRepository,
+      aiSettingsService,
+    ] = await Promise.all([
       import('../src/db/postgres.js'),
       import('../src/db/migrate.js'),
       import('../src/db/transaction.js'),
@@ -37,12 +47,15 @@ test(
       import('../src/services/ai-settings.service.js'),
     ]);
     const retrieval = await import('../src/repositories/retrieval.repository.js');
+    const citationService = await import('../src/services/rag/citation.service.js');
 
     const { pool } = database;
     closePool = () => pool.end();
     await migrations.runMigrations();
 
-    const existing = await pool.query<{ count: string }>('SELECT COUNT(*)::TEXT AS count FROM sources');
+    const existing = await pool.query<{ count: string }>(
+      'SELECT COUNT(*)::TEXT AS count FROM sources',
+    );
     assert.equal(existing.rows[0]?.count, '0', 'the disposable integration database must be empty');
 
     let sourceIdForCleanup: number | null = null;
@@ -56,10 +69,14 @@ test(
 
       const initialAiSettings = await aiSettingsService.getAiSettings();
       assert.equal(initialAiSettings.activeProvider, 'gemini');
-      assert.equal(initialAiSettings.providers.find((provider) => provider.id === 'gemini')?.modelId, 'gemini-3.8-flash');
+      assert.equal(
+        initialAiSettings.providers.find((provider) => provider.id === 'gemini')?.modelId,
+        'gemini-3.8-flash',
+      );
       await assert.rejects(
         aiSettingsService.chooseActiveProvider('openai'),
-        (error: unknown) => error instanceof Error && 'code' in error && error.code === 'AI_PROVIDER_NOT_CONFIGURED',
+        (error: unknown) =>
+          error instanceof Error && 'code' in error && error.code === 'AI_PROVIDER_NOT_CONFIGURED',
       );
 
       await aiSettingsRepository.saveProviderConfig({
@@ -68,11 +85,21 @@ test(
         apiKeyCiphertext: 'encrypted-test-only-ciphertext',
       });
       const selectedAiSettings = await aiSettingsService.chooseActiveProvider('openai');
-      const selectedOpenAi = selectedAiSettings.providers.find((provider) => provider.id === 'openai');
+      const selectedOpenAi = selectedAiSettings.providers.find(
+        (provider) => provider.id === 'openai',
+      );
       assert.equal(selectedAiSettings.activeProvider, 'openai');
       assert.equal(selectedOpenAi?.configured, true);
-      assert.equal('apiKey' in (selectedOpenAi ?? {}), false, 'API keys must never be returned in settings DTOs');
-      assert.equal('apiKeyCiphertext' in (selectedOpenAi ?? {}), false, 'ciphertext must never be returned in settings DTOs');
+      assert.equal(
+        'apiKey' in (selectedOpenAi ?? {}),
+        false,
+        'API keys must never be returned in settings DTOs',
+      );
+      assert.equal(
+        'apiKeyCiphertext' in (selectedOpenAi ?? {}),
+        false,
+        'ciphertext must never be returned in settings DTOs',
+      );
 
       const externalId = `integration-${randomUUID()}`;
       const create = () =>
@@ -136,7 +163,7 @@ test(
       assert.ok(firstLease);
 
       await pool.query(
-        'UPDATE ingestion_jobs SET lease_expires_at = NOW() - INTERVAL \'1 second\' WHERE id = $1',
+        "UPDATE ingestion_jobs SET lease_expires_at = NOW() - INTERVAL '1 second' WHERE id = $1",
         [firstLease.id],
       );
 
@@ -179,38 +206,103 @@ test(
       );
       const preservedSource = await sources.findSourceById(sourceId);
 
-      assert.deepEqual(preservedChunk.rows.map((row) => row.content), ['previous committed index']);
+      assert.deepEqual(
+        preservedChunk.rows.map((row) => row.content),
+        ['previous committed index'],
+      );
       assert.equal(preservedSource?.status, 'PROCESSING');
 
       await jobs.completeIngestionJob(recoveredLease.id, recoveredLease.leaseToken, [
         {
           sourceId,
           chunkIndex: 0,
-          content: 'PostgreSQL full text search keeps transcript text local while ranking matching passages.',
+          content:
+            'PostgreSQL stores the English full-text index locally and ranks matching transcript passages with ts_rank_cd.',
           startSeconds: 12,
           endSeconds: 24,
         },
+        {
+          sourceId,
+          chunkIndex: 1,
+          content:
+            'Answers cite transcript excerpts with YouTube timestamps so readers can open the video at the supporting moment.',
+          startSeconds: 30,
+          endSeconds: 45,
+        },
+        {
+          sourceId,
+          chunkIndex: 2,
+          content:
+            "A cloud answer provider receives only the user's question and matched excerpts; the complete transcript stays in local PostgreSQL.",
+          startSeconds: 60,
+          endSeconds: 74,
+        },
+        {
+          sourceId,
+          chunkIndex: 3,
+          content:
+            'PostgreSQL source-scoped retrieval uses a GIN index and English text search; lexical matching may miss synonyms and paraphrases.',
+          startSeconds: 90,
+          endSeconds: 105,
+        },
       ]);
 
-      const indexedWithoutVectors = await pool.query<{ content: string; embedding: number[] | null }>(
-        'SELECT content, embedding FROM source_chunks WHERE source_id = $1',
-        [sourceId],
-      );
-      assert.equal(indexedWithoutVectors.rows.length, 1);
-      assert.equal(indexedWithoutVectors.rows[0]?.embedding, null);
+      const indexedWithoutVectors = await pool.query<{
+        content: string;
+        embedding: number[] | null;
+      }>('SELECT content, embedding FROM source_chunks WHERE source_id = $1', [sourceId]);
+      assert.equal(indexedWithoutVectors.rows.length, 4);
+      assert.ok(indexedWithoutVectors.rows.every((row) => row.embedding === null));
 
       const matchingChunks = await retrieval.searchSourceChunksByText(
         sourceId,
         'How does PostgreSQL rank matching passages?',
         5,
       );
-      assert.equal(matchingChunks.length, 1);
+      assert.ok(matchingChunks.length > 0);
       assert.ok((matchingChunks[0]?.relevanceScore ?? 0) > 0);
+      assert.equal(matchingChunks[0]?.chunk_index, 0);
       assert.equal(matchingChunks[0]?.start_seconds, 12);
       assert.deepEqual(
         await retrieval.searchSourceChunksByText(sourceId, 'the and or', 5),
         [],
         'a query with no searchable English terms returns no evidence',
+      );
+
+      let expectedHitsAtK = 0;
+      for (const evaluationCase of RETRIEVAL_EVALUATION.cases) {
+        const retrieved = await retrieval.searchSourceChunksByText(
+          sourceId,
+          evaluationCase.question,
+          RETRIEVAL_EVALUATION.topK,
+        );
+        const matchedExpectedChunk = retrieved.find((chunk) =>
+          evaluationCase.relevantChunkIndexes.some((index) => index === chunk.chunk_index),
+        );
+
+        assert.equal(
+          Boolean(matchedExpectedChunk),
+          evaluationCase.expectedHit,
+          `Retrieval case ${evaluationCase.id} did not match its labeled expectation.`,
+        );
+
+        if (evaluationCase.expectedHit) expectedHitsAtK += 1;
+        if (!matchedExpectedChunk) continue;
+
+        const citation = citationService.mapRetrievedChunk(matchedExpectedChunk);
+        const citationUrl = new URL(citation.href);
+        assert.equal(citation.id, String(matchedExpectedChunk.id));
+        assert.equal(citation.excerpt, matchedExpectedChunk.content);
+        assert.equal(citationUrl.searchParams.get('v'), externalId);
+        assert.equal(citationUrl.searchParams.get('t'), `${matchedExpectedChunk.start_seconds}s`);
+        assert.equal(citation.startSeconds, matchedExpectedChunk.start_seconds);
+        assert.equal(citation.endSeconds, matchedExpectedChunk.end_seconds);
+      }
+
+      const recallAtK = expectedHitsAtK / RETRIEVAL_EVALUATION.cases.length;
+      assert.ok(
+        recallAtK >= RETRIEVAL_EVALUATION.minimumRecallAtK,
+        `Retrieval recall@${RETRIEVAL_EVALUATION.topK} was ${recallAtK.toFixed(2)}; expected at least ${RETRIEVAL_EVALUATION.minimumRecallAtK}.`,
       );
 
       const unrelatedExternalId = `unrelated-${randomUUID()}`;
@@ -248,20 +340,21 @@ test(
       );
 
       const firstTurnId = randomUUID();
-      const beginSameTurn = () => conversations.beginAnswerTurn({
-        sourceId,
-        turnId: firstTurnId,
-        question: 'What is the main idea?',
-        leaseDurationMs: 90_000,
-      });
+      const beginSameTurn = () =>
+        conversations.beginAnswerTurn({
+          sourceId,
+          turnId: firstTurnId,
+          question: 'What is the main idea?',
+          leaseDurationMs: 90_000,
+        });
       const duplicateTurnRequests = await Promise.all([beginSameTurn(), beginSameTurn()]);
       const firstClaim = duplicateTurnRequests.find((result) => result?.kind === 'claimed');
 
       assert.ok(firstClaim && firstClaim.kind === 'claimed');
-      assert.deepEqual(
-        duplicateTurnRequests.map((result) => result?.kind).sort(),
-        ['claimed', 'in_progress'],
-      );
+      assert.deepEqual(duplicateTurnRequests.map((result) => result?.kind).sort(), [
+        'claimed',
+        'in_progress',
+      ]);
 
       const citation = {
         id: 'chunk-0',
@@ -270,14 +363,17 @@ test(
         excerpt: 'The speaker introduces the main idea.',
         href: 'https://www.youtube.com/watch?v=integration&t=15',
       };
-      assert.equal(await conversations.completeAnswerTurn({
-        messageId: firstClaim.assistantMessageId,
-        leaseToken: firstClaim.leaseToken,
-        answer: 'The source is about its main idea.',
-        citations: [citation],
-        providerId: 'gemini',
-        modelId: 'gemini-test-model',
-      }), true);
+      assert.equal(
+        await conversations.completeAnswerTurn({
+          messageId: firstClaim.assistantMessageId,
+          leaseToken: firstClaim.leaseToken,
+          answer: 'The source is about its main idea.',
+          citations: [citation],
+          providerId: 'gemini',
+          modelId: 'gemini-test-model',
+        }),
+        true,
+      );
 
       const replayedTurn = await beginSameTurn();
       assert.equal(replayedTurn?.kind, 'completed');
@@ -294,7 +390,8 @@ test(
           question: 'A different question with the same key',
           leaseDurationMs: 90_000,
         }),
-        (error: unknown) => error instanceof Error && 'code' in error && error.code === 'IDEMPOTENCY_KEY_REUSED',
+        (error: unknown) =>
+          error instanceof Error && 'code' in error && error.code === 'IDEMPOTENCY_KEY_REUSED',
       );
 
       const retryTurnId = randomUUID();
@@ -305,11 +402,18 @@ test(
         leaseDurationMs: 90_000,
       });
       assert.ok(failedAttempt?.kind === 'claimed');
-      assert.equal(await conversations.failAnswerTurn({
-        messageId: failedAttempt.assistantMessageId,
-        leaseToken: failedAttempt.leaseToken,
-        failure: { code: 'OLLAMA_UNAVAILABLE', message: 'Local model service is unavailable.', retryable: true },
-      }), true);
+      assert.equal(
+        await conversations.failAnswerTurn({
+          messageId: failedAttempt.assistantMessageId,
+          leaseToken: failedAttempt.leaseToken,
+          failure: {
+            code: 'OLLAMA_UNAVAILABLE',
+            message: 'Local model service is unavailable.',
+            retryable: true,
+          },
+        }),
+        true,
+      );
 
       const retryClaim = await conversations.beginAnswerTurn({
         sourceId,
@@ -319,12 +423,15 @@ test(
       });
       assert.ok(retryClaim?.kind === 'claimed');
       assert.notEqual(retryClaim.leaseToken, failedAttempt.leaseToken);
-      assert.equal(await conversations.completeAnswerTurn({
-        messageId: retryClaim.assistantMessageId,
-        leaseToken: retryClaim.leaseToken,
-        answer: 'A retried answer.',
-        citations: [],
-      }), true);
+      assert.equal(
+        await conversations.completeAnswerTurn({
+          messageId: retryClaim.assistantMessageId,
+          leaseToken: retryClaim.leaseToken,
+          answer: 'A retried answer.',
+          citations: [],
+        }),
+        true,
+      );
 
       const retryableFailureTurnId = randomUUID();
       const retryableFailure = await conversations.beginAnswerTurn({
@@ -347,18 +454,24 @@ test(
       });
       assert.ok(recoveredChatLease?.kind === 'claimed');
       assert.notEqual(recoveredChatLease.leaseToken, retryableFailure.leaseToken);
-      assert.equal(await conversations.completeAnswerTurn({
-        messageId: retryableFailure.assistantMessageId,
-        leaseToken: retryableFailure.leaseToken,
-        answer: 'A stale answer must not overwrite the owner.',
-        citations: [],
-      }), false);
-      assert.equal(await conversations.completeAnswerTurn({
-        messageId: recoveredChatLease.assistantMessageId,
-        leaseToken: recoveredChatLease.leaseToken,
-        answer: 'The recovered answer.',
-        citations: [],
-      }), true);
+      assert.equal(
+        await conversations.completeAnswerTurn({
+          messageId: retryableFailure.assistantMessageId,
+          leaseToken: retryableFailure.leaseToken,
+          answer: 'A stale answer must not overwrite the owner.',
+          citations: [],
+        }),
+        false,
+      );
+      assert.equal(
+        await conversations.completeAnswerTurn({
+          messageId: recoveredChatLease.assistantMessageId,
+          leaseToken: recoveredChatLease.leaseToken,
+          answer: 'The recovered answer.',
+          citations: [],
+        }),
+        true,
+      );
 
       const nonRetryableTurnId = randomUUID();
       const nonRetryableClaim = await conversations.beginAnswerTurn({
@@ -371,7 +484,11 @@ test(
       await conversations.failAnswerTurn({
         messageId: nonRetryableClaim.assistantMessageId,
         leaseToken: nonRetryableClaim.leaseToken,
-        failure: { code: 'INVALID_REQUEST', message: 'This request cannot be retried.', retryable: false },
+        failure: {
+          code: 'INVALID_REQUEST',
+          message: 'This request cannot be retried.',
+          retryable: false,
+        },
       });
       await assert.rejects(
         conversations.beginAnswerTurn({
@@ -380,19 +497,30 @@ test(
           question: 'A non-retryable request.',
           leaseDurationMs: 90_000,
         }),
-        (error: unknown) => error instanceof Error && 'code' in error && error.code === 'ANSWER_RETRY_NOT_ALLOWED',
+        (error: unknown) =>
+          error instanceof Error && 'code' in error && error.code === 'ANSWER_RETRY_NOT_ALLOWED',
       );
 
       const storedConversation = await conversations.getConversationForSource(sourceId);
       assert.equal(storedConversation?.messages.length, 8);
-      assert.equal(storedConversation?.messages.filter((message) => message.role === 'user').length, 4);
-      assert.equal(storedConversation?.messages.filter((message) => message.role === 'assistant').length, 4);
       assert.equal(
-        storedConversation?.messages.find((message) => message.turnId === firstTurnId && message.role === 'assistant')?.providerId,
+        storedConversation?.messages.filter((message) => message.role === 'user').length,
+        4,
+      );
+      assert.equal(
+        storedConversation?.messages.filter((message) => message.role === 'assistant').length,
+        4,
+      );
+      assert.equal(
+        storedConversation?.messages.find(
+          (message) => message.turnId === firstTurnId && message.role === 'assistant',
+        )?.providerId,
         'gemini',
       );
       assert.equal(
-        storedConversation?.messages.find((message) => message.turnId === firstTurnId && message.role === 'assistant')?.modelId,
+        storedConversation?.messages.find(
+          (message) => message.turnId === firstTurnId && message.role === 'assistant',
+        )?.modelId,
         'gemini-test-model',
       );
       const conversationRecord = await pool.query<{ id: number }>(
@@ -427,12 +555,20 @@ test(
         'SELECT COUNT(*)::TEXT AS count FROM conversations WHERE source_id = $1',
         [sourceId],
       );
-      assert.equal(deletedConversation.rows[0]?.count, '0', 'deleting a source must cascade its conversation');
+      assert.equal(
+        deletedConversation.rows[0]?.count,
+        '0',
+        'deleting a source must cascade its conversation',
+      );
       const deletedMessages = await pool.query<{ count: string }>(
         'SELECT COUNT(*)::TEXT AS count FROM messages WHERE conversation_id = $1',
         [conversationId],
       );
-      assert.equal(deletedMessages.rows[0]?.count, '0', 'deleting a conversation must cascade its messages');
+      assert.equal(
+        deletedMessages.rows[0]?.count,
+        '0',
+        'deleting a conversation must cascade its messages',
+      );
     } finally {
       if (sourceIdForCleanup !== null) {
         await sources.deleteSource(sourceIdForCleanup);

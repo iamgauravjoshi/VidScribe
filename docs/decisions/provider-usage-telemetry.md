@@ -38,7 +38,7 @@ If Gemini returns valid answer text but no `usageMetadata`, the adapter returns 
 
 ## Concurrency scenario
 
-Two simultaneous answers may each produce provider log entries, but the current logs have no common request-correlation ID spanning retrieval, provider generation, and message persistence. Do not use these logs to infer a concurrency limit from aggregate demand. Add request correlation and durable metrics before load testing or making operational guarantees.
+Two simultaneous answers produce independent provider events with distinct request IDs; events for a retry share the durable turn ID but use a new request ID. The [chat observability decision](chat-observability-and-retrieval-evaluation.md) adds this correlation across retrieval, provider generation, persistence, and HTTP completion. Logs remain ephemeral and are not aggregate metrics. Do not infer a concurrency limit from a small set of requests; add durable metrics and a representative workload before making capacity guarantees.
 
 ## Trade-offs
 
@@ -55,7 +55,7 @@ Two simultaneous answers may each produce provider log entries, but the current 
 
 ## Interview explanation
 
-“Provider usage fields are useful for deciding what to build next, but token counts alone are not a billing system. I normalized the vendor response shapes and log counts with provider latency, while preserving successful generation when usage is missing. I did not add a database ledger or hard-coded price table because pricing and token categories differ by provider and can change. Before using this for billing or capacity guarantees, I would add request correlation, durable metrics, and an explicit pricing versioning policy.”
+“Provider usage fields are useful for deciding what to build next, but token counts alone are not a billing system. I normalized the vendor response shapes and log counts with provider latency, while preserving successful generation when usage is missing. I did not add a database ledger or hard-coded price table because pricing and token categories differ by provider and can change. Request IDs now correlate each HTTP attempt through retrieval and generation; before using usage for billing or capacity guarantees, I would add durable metrics, retention rules, and an explicit pricing versioning policy.”
 
 ## References
 

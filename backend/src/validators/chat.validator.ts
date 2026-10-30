@@ -9,7 +9,7 @@ export function validateChatRequest(req: Request): Record<string, string> {
     return errors;
   }
 
-  const { question } = req.body;
+  const { question, requestId } = req.body;
 
   if (typeof question !== 'string') {
     errors.question = 'Question is required and must be a string.';
@@ -27,24 +27,8 @@ export function validateChatRequest(req: Request): Record<string, string> {
     errors.question = 'Question cannot exceed 2000 characters.';
   }
 
-  return errors;
-}
-
-export function validateVideoIdParam(req: Request): Record<string, string> {
-  const errors: Record<string, string> = {};
-
-  const { videoId } = req.params;
-
-  if (!videoId) {
-    errors.videoId = 'Video ID is required.';
-
-    return errors;
-  }
-
-  const parsedVideoId = Number(videoId);
-
-  if (!Number.isInteger(parsedVideoId) || parsedVideoId <= 0) {
-    errors.videoId = 'Video ID must be a positive integer.';
+  if (typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    errors.requestId = 'Request ID must be a valid UUID.';
   }
 
   return errors;

@@ -2,34 +2,34 @@ import type { PoolClient } from 'pg';
 import { pool } from '../db/postgres.js';
 
 export interface CreateChunkInput {
-  videoId: number;
+  sourceId: number;
   chunkIndex: number;
   content: string;
-  embedding: number[];
-  startTimeSeconds: number | null;
-  endTimeSeconds: number | null;
+  embedding?: number[] | null;
+  startSeconds: number | null;
+  endSeconds: number | null;
 }
 
 export async function createChunk(input: CreateChunkInput): Promise<void> {
   await pool.query(
     `
-      INSERT INTO video_chunks (
-        video_id,
+      INSERT INTO source_chunks (
+        source_id,
         chunk_index,
         content,
-        start_time_seconds,
-        end_time_seconds,
+        start_seconds,
+        end_seconds,
         embedding
       )
       VALUES ($1, $2, $3, $4, $5, $6)
     `,
     [
-      input.videoId,
+      input.sourceId,
       input.chunkIndex,
       input.content,
-      input.startTimeSeconds,
-      input.endTimeSeconds,
-      JSON.stringify(input.embedding),
+      input.startSeconds,
+      input.endSeconds,
+      serializeEmbedding(input.embedding),
     ],
   );
 }
@@ -40,23 +40,29 @@ export async function createChunkWithClient(
 ): Promise<void> {
   await client.query(
     `
-      INSERT INTO video_chunks (
-        video_id,
+      INSERT INTO source_chunks (
+        source_id,
         chunk_index,
         content,
-        start_time_seconds,
-        end_time_seconds,
+        start_seconds,
+        end_seconds,
         embedding
       )
       VALUES ($1, $2, $3, $4, $5, $6)
     `,
     [
-      input.videoId,
+      input.sourceId,
       input.chunkIndex,
       input.content,
-      input.startTimeSeconds,
-      input.endTimeSeconds,
-      JSON.stringify(input.embedding),
+      input.startSeconds,
+      input.endSeconds,
+      serializeEmbedding(input.embedding),
     ],
   );
+}
+
+function serializeEmbedding(embedding: number[] | null | undefined): string | null {
+  if (embedding === null || embedding === undefined) return null;
+  if (embedding.length === 0) throw new Error('A vector embedding cannot be empty.');
+  return JSON.stringify(embedding);
 }

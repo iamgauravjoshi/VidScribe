@@ -1,4 +1,8 @@
-# What we are going to build?
+# Historical development notes
+
+> This file contains earlier planning and setup notes and may describe schema or features that do not match the current code. Use the maintained [VidScribe project guide](../docs/PROJECT.md) for the current architecture, setup, data model, and implemented behavior. Update that guide and its linked service/decision documents when the system changes.
+
+## Original product sketch
 
 Our final application will be:
 

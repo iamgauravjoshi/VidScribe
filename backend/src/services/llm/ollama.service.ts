@@ -15,46 +15,36 @@ ollama.client.ts
 http://localhost:11434
 */
 
-import { config } from '../../shared/config/index.js';
-import { logger } from '../../shared/logger/index.js';
 import { chat } from '../../shared/ollama/ollama.client.js';
+import type { ProviderGenerationResult } from '../../types/llm.type.js';
+import { compactTokenUsage, readRecord, readTokenCount } from './providers/provider-http.js';
 
-export async function generateAnswer(prompt: string): Promise<string> {
-  const startedAt = Date.now();
-
-  logger.info('Starting Ollama chat generation', {
-    model: config.ollama.chatModel,
-    timeoutMs: config.ollama.requestTimeoutMs,
+export async function generateOllamaAnswer(input: { prompt: string; modelId: string }): Promise<ProviderGenerationResult> {
+  const response = await chat({
+    model: input.modelId,
+    messages: [{ role: 'user', content: input.prompt }],
+    stream: false,
+    options: { num_predict: 300 },
   });
 
-  try {
-    const response = await chat({
-      model: config.ollama.chatModel,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      stream: false,
-      options: {
-        num_predict: 300,
-      },
-    });
+  const text = response.message.content.trim();
+  if (!text) throw new Error(`Ollama model ${input.modelId} returned an empty answer.`);
 
-    logger.info('Ollama chat generation completed', {
-      model: config.ollama.chatModel,
-      durationMs: Date.now() - startedAt,
-    });
+  // The upstream HTTP response includes these metrics, but the installed
+  // ollama client version does not include them in its TypeScript interface.
+  const usageResponse = readRecord(response);
+  const inputTokens = readTokenCount(usageResponse?.prompt_eval_count);
+  const outputTokens = readTokenCount(usageResponse?.eval_count);
+  const usage = compactTokenUsage({
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens !== undefined && outputTokens !== undefined
+      ? inputTokens + outputTokens
+      : undefined,
+  });
 
-    return response.message.content;
-  } catch (error: unknown) {
-    logger.error('Ollama chat generation failed', {
-      model: config.ollama.chatModel,
-      durationMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : String(error),
-    });
-
-    throw error;
-  }
+  return {
+    text,
+    ...(usage ? { usage } : {}),
+  };
 }

@@ -1,40 +1,34 @@
 // Implementing the actual RAG query
 
-import { generateEmbedding } from '../embeddings/embedding.service.js';
-import { searchSimilarChunks } from '../vector/vector.service.js';
-import { generateAnswer } from '../llm/ollama.service.js';
+import { searchSourceChunksByText } from '../../repositories/retrieval.repository.js';
+import { mapRetrievedChunk } from './citation.service.js';
+import { generateAnswer } from '../llm/llm.service.js';
 import { config } from '../../shared/config/index.js';
-import { RetrievedChunkRow } from '../../types/chunk.type.js';
+import type { RetrievedChunkRow } from '../../types/chunk.type.js';
 import { logger } from '../../shared/logger/logger.js';
+import type { AnswerResult } from '../../types/chat.type.js';
 
-export async function answerQuestion(videoId: number, question: string) {
-  // 1. Convert question into vector
-  const queryEmbedding = await generateEmbedding(question);
-
-  // 2. Search relevant transcript chunks
-  const chunks = await searchSimilarChunks(videoId, queryEmbedding, config.rag.topK);
-
-  // 3. Build context
-  const relevantChunks = chunks.filter(
-    (chunk) => chunk.similarity >= config.rag.similarityThreshold,
-  );
+export async function answerQuestion(sourceId: number, question: string): Promise<AnswerResult> {
+  const relevantChunks = await searchSourceChunksByText(sourceId, question, config.rag.topK);
 
   logger.info('RAG retrieval completed', {
-    videoId,
-    candidateCount: chunks.length,
+    sourceId,
+    retrieval: 'postgres_full_text',
+    candidateCount: relevantChunks.length,
     relevantCount: relevantChunks.length,
     topK: config.rag.topK,
-    similarityThreshold: config.rag.similarityThreshold,
-    scores: chunks.map((chunk) => ({
+    scores: relevantChunks.map((chunk) => ({
       chunkId: chunk.id,
-      similarity: chunk.similarity,
+      relevanceScore: chunk.relevanceScore,
     })),
   });
 
   if (relevantChunks.length === 0) {
     return {
       answer: "I couldn't find enough relevant information in the video to answer that question.",
-      sources: [],
+      citations: [],
+      providerId: null,
+      modelId: null,
     };
   }
 
@@ -42,21 +36,22 @@ export async function answerQuestion(videoId: number, question: string) {
   const prompt = buildPrompt(question, relevantChunks);
 
   // 5. Ask LLM
-  const answer = await generateAnswer(prompt);
+  const generation = await generateAnswer(prompt);
 
   return {
-    answer,
-    sources: relevantChunks,
+    answer: generation.text,
+    citations: relevantChunks.map(mapRetrievedChunk),
+    providerId: generation.provider,
+    modelId: generation.modelId,
   };
 }
 
-function buildPrompt(question: String, relevantChunks: RetrievedChunkRow[]) {
+function buildPrompt(question: string, relevantChunks: RetrievedChunkRow[]) {
   const context = relevantChunks
-    .map(
-      (chunk: any, index: number) =>
-        `
+    .map((chunk, index) =>
+      `
             SOURCE ${index + 1}
-            Timestamp: ${chunk.start_time_seconds} - ${chunk.end_time_seconds}
+            Timestamp: ${chunk.start_seconds} - ${chunk.end_seconds}
             Content: ${chunk.content}
         `,
     )
@@ -64,9 +59,9 @@ function buildPrompt(question: String, relevantChunks: RetrievedChunkRow[]) {
 
   const prompt = `
     You are an AI assistant that answers questions
-    about a YouTube video.
+    about the provided source transcript.
 
-    Use the provided video context to answer the question.
+    Use only the provided transcript excerpts to answer the question.
 
     IMPORTANT RULES:
     1. Answer using the provided context.
@@ -76,7 +71,7 @@ function buildPrompt(question: String, relevantChunks: RetrievedChunkRow[]) {
       information to answer the question.
     4. Explain the answer clearly.
 
-    VIDEO CONTEXT: ${context}
+    SOURCE TRANSCRIPT EXCERPTS: ${context}
     USER QUESTION: ${question}
   `;
 

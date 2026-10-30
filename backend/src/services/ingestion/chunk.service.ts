@@ -73,6 +73,13 @@ export function createChunks(
       endTime: lastSegment.start + lastSegment.duration,
     });
 
+    // Overlap exists only to connect chunks. Do not emit a trailing chunk
+    // that contains no new transcript segments after the final chunk covers
+    // the remaining input.
+    if (endIndex >= transcript.length) {
+      break;
+    }
+
     /*
      * Move forward while preserving enough transcript
      * content to create the requested overlap.

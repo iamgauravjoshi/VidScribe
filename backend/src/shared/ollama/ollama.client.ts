@@ -1,30 +1,22 @@
 /*
                   ┌────────────────────┐
                   │ ollama.client.ts   │
-                  │                    │
                   │ HTTP               │
                   │ timeout            │
-                  │ AbortController    │
                   │ response parsing   │
                   │ HTTP errors        │
                   └─────────┬──────────┘
                             │
-                 ┌──────────┴──────────┐
-                 ▼                     ▼
-       ollama.service.ts      embedding.service.ts
-              │                       │
-              ▼                       ▼
-          Chat/RAG                 Embeddings
+                            ▼
+                   ollama.service.ts
+                            │
+                            ▼
+                  Optional local answers
 */
 
 import { config } from '../config/index.js';
 import { AppError, ErrorCode } from '../errors/index.js';
-import type {
-  OllamaChatRequest,
-  OllamaChatResponse,
-  OllamaEmbedRequest,
-  OllamaEmbedResponse,
-} from './ollama.types.js';
+import type { OllamaChatRequest, OllamaChatResponse } from './ollama.types.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -42,27 +34,11 @@ function isOllamaChatResponse(value: unknown): value is OllamaChatResponse {
   );
 }
 
-function isOllamaEmbedResponse(value: unknown): value is OllamaEmbedResponse {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const embeddings = value.embeddings;
-
-  return (
-    Array.isArray(embeddings) &&
-    embeddings.every(
-      (embedding): embedding is number[] =>
-        Array.isArray(embedding) && embedding.every((value) => typeof value === 'number'),
-    )
-  );
-}
-
 async function makeRequest<T>(
   endpoint: string,
   body: unknown,
   validateResponse: (value: unknown) => value is T,
-  operation: 'chat' | 'embedding',
+  operation: 'chat',
 ): Promise<T> {
   const controller = new AbortController();
 
@@ -85,11 +61,7 @@ async function makeRequest<T>(
 
       throw new AppError(
         `Ollama returned HTTP ${response.status}.`,
-        response.status >= 500
-          ? ErrorCode.OLLAMA_UNAVAILABLE
-          : operation === 'chat'
-            ? ErrorCode.OLLAMA_GENERATION_FAILED
-            : ErrorCode.OLLAMA_EMBEDDING_FAILED,
+        response.status >= 500 ? ErrorCode.OLLAMA_UNAVAILABLE : ErrorCode.OLLAMA_GENERATION_FAILED,
         response.status >= 500 ? 503 : 502,
         {
           operation,
@@ -104,9 +76,7 @@ async function makeRequest<T>(
     if (!validateResponse(data)) {
       throw new AppError(
         `Ollama returned an unexpected ${operation} response.`,
-        operation === 'chat'
-          ? ErrorCode.OLLAMA_GENERATION_FAILED
-          : ErrorCode.OLLAMA_EMBEDDING_FAILED,
+        ErrorCode.OLLAMA_GENERATION_FAILED,
         502,
         { operation },
       );
@@ -133,7 +103,7 @@ async function makeRequest<T>(
 
     throw new AppError(
       `Ollama ${operation} request failed.`,
-      operation === 'chat' ? ErrorCode.OLLAMA_GENERATION_FAILED : ErrorCode.OLLAMA_EMBEDDING_FAILED,
+      ErrorCode.OLLAMA_GENERATION_FAILED,
       502,
       { operation },
     );
@@ -144,8 +114,4 @@ async function makeRequest<T>(
 
 export async function chat(chatRequest: OllamaChatRequest): Promise<OllamaChatResponse> {
   return makeRequest('/api/chat', chatRequest, isOllamaChatResponse, 'chat');
-}
-
-export async function embed(embedRequest: OllamaEmbedRequest): Promise<OllamaEmbedResponse> {
-  return makeRequest('/api/embed', embedRequest, isOllamaEmbedResponse, 'embedding');
 }

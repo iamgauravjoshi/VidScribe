@@ -8,28 +8,35 @@ interface Props {
 export function ChatInput({ onSend, disabled }: Props) {
   const [message, setMessage] = useState('');
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const question = message.trim();
 
-    if (!message.trim()) {
-      return;
-    }
+    if (!question || disabled) return;
 
-    onSend(message.trim());
+    onSend(question);
     setMessage('');
   };
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form className="chat-composer" onSubmit={handleSubmit}>
+      <label className="sr-only" htmlFor="question-input">Ask about this video</label>
       <input
-        value={message}
+        autoComplete="off"
+        id="question-input"
+        maxLength={2000}
         onChange={(event) => setMessage(event.target.value)}
-        placeholder="Ask about the video..."
+        placeholder="Ask about this video…"
+        value={message}
         disabled={disabled}
       />
-
-      <button type="submit" disabled={disabled || !message.trim()}>
-        Send
+      <button
+        aria-label="Send question"
+        className="send-button"
+        disabled={disabled || !message.trim()}
+        type="submit"
+      >
+        <span aria-hidden="true">↑</span>
       </button>
     </form>
   );

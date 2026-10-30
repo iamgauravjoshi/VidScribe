@@ -1,0 +1,21 @@
+name: vidscribe-test
+
+services:
+  postgres-test:
+    image: pgvector/pgvector:0.8.6-pg18-trixie
+    environment:
+      POSTGRES_DB: vidscribe_test
+      POSTGRES_USER: vidscribe_test
+      POSTGRES_PASSWORD: vidscribe_test
+    ports:
+      - "127.0.0.1::5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vidscribe_test -d vidscribe_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - vidscribe_test_postgres_data:/var/lib/postgresql
+
+volumes:
+  vidscribe_test_postgres_data:

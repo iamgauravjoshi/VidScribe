@@ -111,3 +111,20 @@ env/
 *.sw?
 *.swp
 *.swo
+
+# ================================
+# Local agent tooling and browser artifacts
+# ================================
+
+# Locally installed agent skills and their generated lock metadata
+/.agents/
+/skills-lock.json
+
+# Browser automation snapshots, screenshots, and test output
+/.playwright-mcp/
+/playwright-report/
+/test-results/
+/blob-report/
+
+# Unstructured local learning notes; keep useful project docs under docs/
+/New Text Document.txt

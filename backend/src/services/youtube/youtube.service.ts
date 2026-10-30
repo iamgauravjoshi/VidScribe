@@ -17,6 +17,8 @@ normalize transcript
 import { fetchTranscript } from 'youtube-transcript';
 import { extractYouTubeVideoId } from './youtube-url.service.js';
 import type { TranscriptSegment } from '../../types/transcript.type.js';
+import { AppError, ErrorCode } from '../../shared/errors/index.js';
+import { logger } from '../../shared/logger/index.js';
 
 interface YouTubeTranscriptResponse {
   text: string;
@@ -36,8 +38,32 @@ export function normalizeTranscript(transcript: YouTubeTranscriptResponse[]): Tr
 
 export async function getTranscript(url: string) {
   const videoId = extractYouTubeVideoId(url);
-  const rawTranscript = await fetchTranscript(videoId, { lang: 'en' });
+  let rawTranscript: YouTubeTranscriptResponse[];
+
+  try {
+    rawTranscript = await fetchTranscript(videoId, { lang: 'en' });
+  } catch (error: unknown) {
+    logger.warn('YouTube transcript request failed', {
+      videoId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    throw new AppError(
+      'YouTube captions could not be retrieved. Check that the video is public, then retry.',
+      ErrorCode.TRANSCRIPT_FETCH_FAILED,
+      502,
+    );
+  }
+
   const transcript = normalizeTranscript(rawTranscript);
+
+  if (transcript.length === 0 || transcript.every((segment) => !segment.text.trim())) {
+    throw new AppError(
+      'No usable English captions were found for this video.',
+      ErrorCode.TRANSCRIPT_NOT_AVAILABLE,
+      422,
+    );
+  }
 
   return {
     videoId,

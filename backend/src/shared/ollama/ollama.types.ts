@@ -19,11 +19,3 @@ export interface OllamaChatResponse {
   };
 }
 
-export interface OllamaEmbedRequest {
-  model: string;
-  input: string;
-}
-
-export interface OllamaEmbedResponse {
-  embeddings: number[][];
-}

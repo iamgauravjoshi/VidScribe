@@ -31,6 +31,11 @@ function getRequiredEnv(name: string): string {
   return value.trim();
 }
 
+function getOptionalEnv(name: string, defaultValue: string): string {
+  const value = process.env[name];
+  return value?.trim() || defaultValue;
+}
+
 /**
  * Retrieves a numeric environment variable.
  * Performs basic numeric validation.
@@ -55,11 +60,31 @@ function getNumberEnv(name: string, defaultValue?: number): number {
   return parsedValue;
 }
 
+function getPositiveIntegerEnv(name: string, defaultValue: number): number {
+  const value = getNumberEnv(name, defaultValue);
+
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`Environment variable ${name} must be a positive integer.`);
+  }
+
+  return value;
+}
+
+function getNonNegativeIntegerEnv(name: string, defaultValue: number): number {
+  const value = getNumberEnv(name, defaultValue);
+
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Environment variable ${name} must be a non-negative integer.`);
+  }
+
+  return value;
+}
+
 /**
  * Validates a URL environment variable.
  */
-function getUrlEnv(name: string): string {
-  const value = getRequiredEnv(name);
+function getUrlEnv(name: string, defaultValue?: string): string {
+  const value = defaultValue === undefined ? getRequiredEnv(name) : getOptionalEnv(name, defaultValue);
 
   try {
     new URL(value);
@@ -99,16 +124,31 @@ export const config = {
   },
 
   ollama: {
-    baseUrl: getUrlEnv('OLLAMA_BASE_URL'),
-    chatModel: getRequiredEnv('OLLAMA_CHAT_MODEL'),
-    embeddingModel: getRequiredEnv('OLLAMA_EMBEDDING_MODEL'),
-    requestTimeoutMs: getNumberEnv('OLLAMA_REQUEST_TIMEOUT_MS'),
+    baseUrl: getUrlEnv('OLLAMA_BASE_URL', 'http://localhost:11434'),
+    chatModel: getOptionalEnv('OLLAMA_CHAT_MODEL', 'gemma3:1b'),
+    requestTimeoutMs: getPositiveIntegerEnv('OLLAMA_REQUEST_TIMEOUT_MS', 120000),
+  },
+
+  ai: {
+    requestTimeoutMs: getPositiveIntegerEnv(
+      'AI_REQUEST_TIMEOUT_MS',
+      120000,
+    ),
   },
 
   rag: {
-    topK: getNumberEnv('RAG_TOP_K', 5),
-    similarityThreshold: getNumberEnv('RAG_SIMILARITY_THRESHOLD', 0.4),
-    chunkSize: getNumberEnv('RAG_CHUNK_SIZE', 2000),
-    chunkOverlap: getNumberEnv('RAG_CHUNK_OVERLAP', 300),
+    topK: getPositiveIntegerEnv('RAG_TOP_K', 5),
+    chunkSize: getPositiveIntegerEnv('RAG_CHUNK_SIZE', 2000),
+    chunkOverlap: getNonNegativeIntegerEnv('RAG_CHUNK_OVERLAP', 300),
+  },
+
+  ingestion: {
+    workerPollIntervalMs: getPositiveIntegerEnv('INGESTION_WORKER_POLL_INTERVAL_MS', 1000),
+    jobLeaseDurationMs: getPositiveIntegerEnv('INGESTION_JOB_LEASE_DURATION_MS', 90000),
+    maxWorkerAttempts: getPositiveIntegerEnv('INGESTION_MAX_WORKER_ATTEMPTS', 3),
+  },
+
+  chat: {
+    generationLeaseDurationMs: getPositiveIntegerEnv('CHAT_GENERATION_LEASE_DURATION_MS', 180000),
   },
 } as const;

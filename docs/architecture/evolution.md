@@ -506,11 +506,11 @@ A real caption response returned srv3 values in milliseconds, while another supp
 
 ### Why this is better
 
-All parts of VidScribe now share the same seconds contract, including historical answers. The workflow can evaluate real source language and citation behavior while keeping the standard pull request gate deterministic and secret-free. The existing GitHub run demonstrated the gate can complete build, lint, PostgreSQL, and browser validation; the new migration coverage must pass a follow-up before the branch is complete.
+All parts of VidScribe now share the same seconds contract, including historical answers. The workflow keeps the standard pull request gate deterministic and secret-free. Hosted run [41608534092](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41608534092) passed build, lint, PostgreSQL migration coverage, and all five browser tests. The separate real-source evaluation did not produce quality evidence: run [41608747780](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41608747780) could not fetch captions for any of its three videos on GitHub-hosted runners. Docker Desktop was unavailable for a local database-backed rerun.
 
 ### Trade-offs and deferred work
 
-The adapter infers units because the dependency does not expose format metadata. The legacy chunk-only migration heuristic is weaker than segment-duration detection and uses a conservative threshold. The six-query real-source sample is too small to establish answer truthfulness or justify a broad search redesign; measured results should guide whether to improve retrieval/citations or add another source adapter.
+The adapter infers units because the dependency does not expose format metadata. The legacy chunk-only migration heuristic is weaker than segment-duration detection and uses a conservative threshold. The six-query real-source sample is too small to establish answer truthfulness or justify a broad search redesign, and it remains unmeasured until run from a caption-accessible environment. The synthetic retrieval fixture's 0.75 Recall@3 and known paraphrase miss provide a provisional reason to improve local lexical retrieval/citation ranking before adding another input type; confirm that priority with real-transcript measurements.
 
 ### References
 

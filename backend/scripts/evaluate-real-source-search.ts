@@ -120,6 +120,11 @@ async function main(): Promise<void> {
     segmentCount: number;
     chunkCount: number;
   }> = [];
+  const unavailableSources: Array<{
+    title: string;
+    url: string;
+    failureCode: string;
+  }> = [];
 
   try {
     await migrations.runMigrations();
@@ -161,13 +166,13 @@ async function main(): Promise<void> {
       await ingestion.processIngestionJob(job);
       const processedSource = await sourceRepository.findSourceById(created.source.id);
       if (processedSource?.status !== 'READY') {
-        throw new Error(
-          'Could not index ' +
-            sourceInput.videoId +
-            ': ' +
-            (processedSource?.failure?.code ?? processedSource?.status ?? 'source missing') +
-            '.',
-        );
+        unavailableSources.push({
+          title: sourceInput.title,
+          url: canonicalUrl,
+          failureCode:
+            processedSource?.failure?.code ?? processedSource?.status ?? 'SOURCE_MISSING',
+        });
+        continue;
       }
 
       const stats = await pool.query<{ segment_count: number; chunk_count: number }>(
@@ -249,24 +254,27 @@ async function main(): Promise<void> {
       .map((result) => result.citationStartOffsetSeconds)
       .filter((offset): offset is number => offset !== null);
     const retrievedRelevantQueries = queryResults.filter((result) => result.relevantRank !== null);
-    const expectedQueries = sourcesToEvaluate.reduce(
-      (count, source) => count + source.queries.length,
-      0,
-    );
+    const expectedQueries = queryResults.length;
     const report = {
       generatedAt: new Date().toISOString(),
       retrieval: 'PostgreSQL English full-text search; top 5 capped by application configuration',
       providerCalls: 0,
       sourceCount: sourceResults.length,
+      requestedSourceCount: sourcesToEvaluate.length,
       queryCount: queryResults.length,
       effectiveTopK: topK,
       metrics: {
-        recallAt5: queryResults.filter((result) => result.hitAt5).length / expectedQueries,
+        recallAt5:
+          expectedQueries === 0
+            ? null
+            : queryResults.filter((result) => result.hitAt5).length / expectedQueries,
         meanReciprocalRank:
-          queryResults.reduce(
-            (sum, result) => sum + (result.relevantRank === null ? 0 : 1 / result.relevantRank),
-            0,
-          ) / expectedQueries,
+          expectedQueries === 0
+            ? null
+            : queryResults.reduce(
+                (sum, result) => sum + (result.relevantRank === null ? 0 : 1 / result.relevantRank),
+                0,
+              ) / expectedQueries,
         medianCitationStartOffsetSeconds: median(citationOffsets),
         validCitationLinkRateWhenRelevantChunkFound:
           retrievedRelevantQueries.length === 0
@@ -275,6 +283,7 @@ async function main(): Promise<void> {
               retrievedRelevantQueries.length,
       },
       sources: sourceResults,
+      unavailableSources,
       queries: queryResults,
       limitations: [
         'Six manually labeled evidence anchors across three public English-captioned YouTube videos are a diagnostic sample, not a representative benchmark.',
@@ -285,6 +294,11 @@ async function main(): Promise<void> {
     const outputPath = fileURLToPath(new URL('../../real-source-evaluation.json', import.meta.url));
     await writeFile(outputPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
     process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+    if (sourceResults.length < 2 || queryResults.length < 4) {
+      throw new Error(
+        'Evaluation needs at least two available sources and four labeled queries; see the report for caption failures.',
+      );
+    }
   } finally {
     try {
       for (const sourceId of createdSourceIds) {

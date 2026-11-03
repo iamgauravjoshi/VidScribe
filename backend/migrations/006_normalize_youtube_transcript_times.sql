@@ -63,7 +63,7 @@ SET citations = COALESCE(
           'endSeconds',
           CASE
             WHEN JSONB_TYPEOF(citation.value -> 'endSeconds') = 'number'
-            THEN (citation.value ->> 'endSeconds')::DOUBLE PRECISION / 1000.0
+            THEN TO_JSONB((citation.value ->> 'endSeconds')::DOUBLE PRECISION / 1000.0)
             ELSE citation.value -> 'endSeconds'
           END,
           'href',

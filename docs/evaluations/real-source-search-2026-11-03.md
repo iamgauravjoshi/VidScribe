@@ -1,7 +1,7 @@
 # Real-source search and citation baseline
 
 **Date:** 2026-11-03  
-**Status:** Baseline and first reranking comparison; expand before making broad product claims
+**Status:** Baseline, first reranking comparison, and expanded evidence-quality sample; expand before making broad product claims
 
 ## Purpose
 
@@ -56,17 +56,74 @@ The retrieval query now preserves the original chunk-level top-five candidate se
 
 The new relevant ranks are 1, 3, 2, 5, 1, and 1. All six returned citation URLs use the selected segment's start time, and each matching segment was found. Citation precision here is measured against the labeled anchor segment, not through subjective player testing.
 
+## Expanded evidence-quality check: dataset v2
+
+The second pass uses six captioned YouTube sources spanning psychology, communication, computer science, leadership, motivation, and education. It has 18 questions, three per source. Each label uses a short phrase selected from one exact canonical transcript segment. The harness normalizes case and caption line breaks, records the selected segment index/time, and requires an explicit occurrence when an anchor phrase appears in more than one segment.
+
+The report separates **evidence chunk recall** from **exact labeled-segment citation**. A chunk hit means its timestamp range contains the labeled segment. An exact citation hit means a result's selected citation segment has the same canonical segment index as the label. This stricter measure can count a nearby useful caption as a miss; it is a review signal, not a complete judgment of semantic support. The evaluation does not generate answers or call an AI provider.
+
+| Measure | Result | Interpretation |
+| --- | ---: | --- |
+| Sources with English captions | 6 / 6 | All six source fixtures were available locally. |
+| Labeled questions | 18 | Three per source, across lexical, paraphrase, and definition styles. |
+| Evidence Recall@1 / @3 / @5 | 0.500 / 0.833 / 0.944 | The labeled segment appeared inside a retrieved chunk for 17 of 18 questions by rank five. |
+| Evidence mean reciprocal rank | 0.676 | Rank is based on the first chunk containing the labeled segment. |
+| Exact labeled-segment citation @1 / @3 / @5 | 0.222 / 0.556 / 0.611 | At least one result cited the exact labeled segment in 11 of 18 questions by rank five. |
+| Exact match for the first relevant chunk's citation | 0.588 (10 / 17) | The citation attached to the highest-ranked chunk covering the target matched the exact label in 10 of 17 evidence-found cases. |
+| Anchor phrase present in that citation | 0.588 (10 / 17) | The cited excerpt contained the manually selected phrase in those same cases. |
+| Median / p90 / maximum citation-start distance | 0 / 58.80 / 101 s | The median is precise, but the tail includes materially distant citations. |
+| Valid timestamp URL rate when evidence was found | 1.000 (17 / 17) | URLs used the correct video and selected-segment time. |
+| Duplicate citations removed across all questions | 6 | Overlapping chunks produced six repeated segment citations that were deduplicated. |
+| Provider calls | 0 | Search, labeling, and citations remained provider-free. |
+
+### Results by query style
+
+| Style | Questions | Evidence Recall@5 | Exact labeled-segment citation@5 |
+| --- | ---: | ---: | ---: |
+| Lexical | 9 | 1.000 (9 / 9) | 0.778 (7 / 9) |
+| Paraphrase | 5 | 0.800 (4 / 5) | 0.600 (3 / 5) |
+| Definition | 4 | 1.000 (4 / 4) | 0.250 (1 / 4) |
+
+Definition-style questions are the clearest citation-selection weakness in this sample. The neural-network connection-weight paraphrase is the single question whose labeled chunk did not appear in the top five. These cases should be reviewed against the video before changing the ranking policy: a neighboring segment can still support an answer, and exact segment identity alone cannot decide that.
+
+### Case-level timestamp audit
+
+`Evidence rank` is the first chunk whose range contains the target segment. `Exact cite rank` is the first result that cites that exact segment. `Cited time` is the citation attached to the first relevant chunk. These fields are intentionally separate: the exact target may appear later in the ranked list, or not at all.
+
+| Source | Case | Evidence rank | Exact cite rank | Target | Cited time | Absolute distance |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| [Judson Brewer](https://www.youtube.com/watch?v=-moW9jvvMr4&t=69s) | `reward-based-habit-learning` | 1 | 1 | 69.8 s | 69.8 s | 0 s |
+| [Judson Brewer](https://www.youtube.com/watch?v=-moW9jvvMr4&t=391s) | `curiosity-and-urges` | 3 | 3 | 391.4 s | 391.4 s | 0 s |
+| [Judson Brewer](https://www.youtube.com/watch?v=-moW9jvvMr4&t=69s) | `habit-learning-mechanism` | 1 | — | 69.8 s | 128.6 s | 58.8 s |
+| [Julian Treasure](https://www.youtube.com/watch?v=eIho2S0ZahI&t=49s) | `first-harmful-speech-habit` | 1 | 1 | 49.1 s | 49.1 s | 0 s |
+| [Julian Treasure](https://www.youtube.com/watch?v=eIho2S0ZahI&t=208s) | `hail-authenticity` | 1 | — | 208.3 s | 198.9 s | 9.4 s |
+| [Julian Treasure](https://www.youtube.com/watch?v=eIho2S0ZahI&t=224s) | `hail-love` | 1 | 2 | 224.4 s | 255.3 s | 31.0 s |
+| [3Blue1Brown](https://www.youtube.com/watch?v=aircAruvnKk&t=917s) | `what-neurons-hold` | 3 | 3 | 917.8 s | 917.8 s | 0 s |
+| [3Blue1Brown](https://www.youtube.com/watch?v=aircAruvnKk&t=548s) | `connection-weight-assignment` | — | — | 548.7 s | — | — |
+| [3Blue1Brown](https://www.youtube.com/watch?v=aircAruvnKk&t=556s) | `connection-weight-values` | 1 | 1 | 556.3 s | 556.3 s | 0 s |
+| [Simon Sinek](https://www.youtube.com/watch?v=qp0HIF3SfI4&t=121s) | `golden-circle-name` | 1 | — | 121.3 s | 20.3 s | 101.0 s |
+| [Simon Sinek](https://www.youtube.com/watch?v=qp0HIF3SfI4&t=667s) | `innovation-diffusion-law` | 2 | 2 | 667.7 s | 667.7 s | 0 s |
+| [Simon Sinek](https://www.youtube.com/watch?v=qp0HIF3SfI4&t=29s) | `apple-example-question` | 2 | 2 | 29.3 s | 29.3 s | 0 s |
+| [Dan Pink](https://www.youtube.com/watch?v=rrkrvAUbU9Y&t=111s) | `candle-task-name` | 1 | — | 111.4 s | 128.8 s | 17.4 s |
+| [Dan Pink](https://www.youtube.com/watch?v=rrkrvAUbU9Y&t=761s) | `autonomy-definition` | 2 | — | 761.2 s | 757.9 s | 3.3 s |
+| [Dan Pink](https://www.youtube.com/watch?v=rrkrvAUbU9Y&t=757s) | `intrinsic-motivator-list` | 4 | — | 757.9 s | 743.4 s | 14.5 s |
+| [Ken Robinson](https://www.youtube.com/watch?v=iG9CE55wbtY&t=366s) | `school-treatment-of-mistakes` | 2 | 2 | 366.7 s | 366.7 s | 0 s |
+| [Ken Robinson](https://www.youtube.com/watch?v=iG9CE55wbtY&t=1051s) | `gillian-lynne-company` | 1 | 1 | 1051.1 s | 1051.1 s | 0 s |
+| [Ken Robinson](https://www.youtube.com/watch?v=iG9CE55wbtY&t=48s) | `human-creativity` | 4 | 4 | 49.0 s | 49.0 s | 0 s |
+
+The local report includes each question, its anchor phrase and segment index, citation URL, exact-segment rank, and deduplication counts. That makes mismatches inspectable without copying full transcripts into the repository. The raw JSON is generated locally and remains ignored by Git.
+
 ## Product implication
 
-The reranker improved the first relevant result's position without changing which chunks were eligible for the top five, and segment citations narrowed the measured anchor-to-start gap. This is useful evidence for the implementation, but six hand-labeled questions are too few to show that the gains generalize or to establish answer quality.
+The first paired comparison showed improved ordering and timestamp proximity while preserving the original six-query Recall@5. The broader set confirms strong chunk recall, but the exact-segment metric exposes a separate citation-selection gap, especially for definition questions. The median time offset alone hid outliers: the p90 was 58.80 seconds and the maximum was 101 seconds.
 
-**Recommended next step:** expand the labeled set across more sources, question styles, and longer transcripts; verify human-perceived seek quality and whether the cited segment actually supports generated answers. Keep PostgreSQL full-text search as the measured baseline. After that evaluation, decide whether a second input adapter offers more product value than hybrid semantic retrieval. Do not infer a need for vector search from this small sample.
+**Recommended next step:** review exact-segment mismatches in the video player, then run a small, explicitly reviewed provider-backed answer sample to judge whether the selected citation supports the generated answer. Tune citation selection only where that audit confirms a real mismatch. Keep PostgreSQL full-text search as the measured baseline; decide about a second input adapter or hybrid semantic retrieval after this targeted review.
 
 ## Limitations
 
-- Three educational videos and six hand-selected anchors are a small convenience sample, not a representative benchmark.
-- Relevance means that the returned chunk spans a manually selected transcript anchor. It does not establish that a generated answer is complete, factually correct, or supported strongly enough for a human reader.
-- Link validation checks the expected video ID and timestamp parameter; it does not automate YouTube playback or verify the user's perceived jump precision.
+- The original paired comparison uses three educational videos and six hand-selected anchors. Dataset v2 grows that to six videos and 18 labels, but remains a convenience sample dominated by public educational talks on YouTube.
+- A hit means the chunk covers a manually selected support segment. Exact segment identity is a strict metric and does not establish that a generated answer is complete, factually correct, or supported strongly enough for a reader.
+- Link validation checks the expected video ID and timestamp parameter; it does not automate playback, independently review the generated answer, or verify a person's perceived seek quality.
 - The reranking comparison uses the same three sources and six labels as the baseline. It is a paired diagnostic, not an independently sampled validation set.
 - The sample uses `Recall@5`, while the existing synthetic fixture reports `Recall@3 = 0.75`; the scores should not be compared directly because their cutoffs and corpora differ.
 - Caption access varies by environment. GitHub-hosted runners could not fetch these same captions, while the local run could.

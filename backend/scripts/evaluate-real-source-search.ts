@@ -1,76 +1,138 @@
 import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
+import {
+  REAL_SOURCE_SEARCH_DATASET,
+  type EvaluationQueryStyle,
+} from './real-source-search.dataset.js';
+import { normalizeEvidenceText, selectEvidenceAnchor } from './real-source-search.labels.js';
 import { assertDedicatedTestDatabase } from '../test/e2e-database.js';
 
-interface EvaluationQuery {
-  id: string;
-  question: string;
-  anchorTerm: string;
+const sourcesToEvaluate = REAL_SOURCE_SEARCH_DATASET.sources;
+
+interface RankedEvaluationMatch {
+  rank: number;
+  chunkIndex: number;
+  relevanceScore: number;
+  phraseMatch: boolean;
+  fullQueryMatch: boolean;
+  citationSegmentIndex: number | null;
+  citationStartSeconds: number | null;
+  citationPhraseMatch: boolean | null;
+  citationFullQueryMatch: boolean | null;
+  citationRelevanceScore: number | null;
+  targetsLabeledSegment: boolean;
 }
 
-interface EvaluationSource {
-  title: string;
+interface EvaluationQueryResult {
+  sourceTitle: string;
+  sourceTopic: string;
   videoId: string;
-  queries: EvaluationQuery[];
+  queryId: string;
+  queryStyle: EvaluationQueryStyle;
+  question: string;
+  anchorPhrase: string;
+  anchorOccurrence: number;
+  matchingAnchorSegments: number;
+  targetSegmentIndex: number;
+  targetSeconds: number;
+  evidenceChunkRank: number | null;
+  exactCitationRank: number | null;
+  evidenceHitAt1: boolean;
+  evidenceHitAt3: boolean;
+  evidenceHitAt5: boolean;
+  exactCitationHitAt1: boolean;
+  exactCitationHitAt3: boolean;
+  exactCitationHitAt5: boolean;
+  relevantChunkStartSeconds: number | null;
+  citationStartSeconds: number | null;
+  chunkStartOffsetSeconds: number | null;
+  citationStartOffsetSeconds: number | null;
+  citationSegmentFound: boolean;
+  citationTargetsLabeledSegment: boolean;
+  citationContainsAnchorPhrase: boolean;
+  citationLinkValid: boolean;
+  citationUrl: string | null;
+  uniqueCitationCount: number;
+  duplicateCitationCount: number;
+  topMatches: RankedEvaluationMatch[];
 }
-
-const sourcesToEvaluate: EvaluationSource[] = [
-  {
-    title: 'A Simple Way to Break a Bad Habit | Judson Brewer | TED',
-    videoId: '-moW9jvvMr4',
-    queries: [
-      {
-        id: 'reward-based-habit-learning',
-        question: 'How does reward-based learning shape habits?',
-        anchorTerm: 'reward',
-      },
-      {
-        id: 'curiosity-and-urges',
-        question: 'Why does curiosity help change an urge?',
-        anchorTerm: 'curiosity',
-      },
-    ],
-  },
-  {
-    title: 'How to Speak So That People Want to Listen | Julian Treasure | TED',
-    videoId: 'eIho2S0ZahI',
-    queries: [
-      {
-        id: 'hail-speaking-model',
-        question: 'What does the word HAIL represent in a talk?',
-        anchorTerm: 'hail',
-      },
-      {
-        id: 'gossip-lexical-paraphrase',
-        question: 'What is one unhelpful thing a speaker should avoid?',
-        anchorTerm: 'gossip',
-      },
-    ],
-  },
-  {
-    title: 'But what is a neural network? | Deep learning chapter 1',
-    videoId: 'aircAruvnKk',
-    queries: [
-      {
-        id: 'neural-network-neurons',
-        question: 'What are neurons in a neural network?',
-        anchorTerm: 'neuron',
-      },
-      {
-        id: 'connection-importance',
-        question: 'How are the connections between neurons assigned importance?',
-        anchorTerm: 'assign',
-      },
-    ],
-  },
-];
 
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle]!;
+}
+
+function percentile(values: number[], percentileRank: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.max(0, Math.ceil(percentileRank * sorted.length) - 1);
+  return sorted[index] ?? null;
+}
+
+function rate<T>(values: T[], predicate: (value: T) => boolean): number | null {
+  return values.length === 0 ? null : values.filter(predicate).length / values.length;
+}
+
+function meanReciprocalRank(
+  results: EvaluationQueryResult[],
+  getRank: (result: EvaluationQueryResult) => number | null,
+): number | null {
+  return results.length === 0
+    ? null
+    : results.reduce((sum, result) => {
+        const rank = getRank(result);
+        return sum + (rank === null ? 0 : 1 / rank);
+      }, 0) / results.length;
+}
+
+function summarizeQueries(results: EvaluationQueryResult[]) {
+  const chunkOffsets = results
+    .map((result) => result.chunkStartOffsetSeconds)
+    .filter((offset): offset is number => offset !== null);
+  const citationOffsets = results
+    .map((result) => result.citationStartOffsetSeconds)
+    .filter((offset): offset is number => offset !== null);
+  const relevantChunkResults = results.filter((result) => result.evidenceChunkRank !== null);
+
+  return {
+    queryCount: results.length,
+    evidenceFoundCount: results.filter((result) => result.evidenceChunkRank !== null).length,
+    evidenceRecallAt1: rate(results, (result) => result.evidenceHitAt1),
+    evidenceRecallAt3: rate(results, (result) => result.evidenceHitAt3),
+    evidenceRecallAt5: rate(results, (result) => result.evidenceHitAt5),
+    evidenceMeanReciprocalRank: meanReciprocalRank(results, (result) => result.evidenceChunkRank),
+    exactSupportCitationAt1: rate(results, (result) => result.exactCitationHitAt1),
+    exactSupportCitationAt3: rate(results, (result) => result.exactCitationHitAt3),
+    exactSupportCitationAt5: rate(results, (result) => result.exactCitationHitAt5),
+    exactSupportCitationMeanReciprocalRank: meanReciprocalRank(
+      results,
+      (result) => result.exactCitationRank,
+    ),
+    medianChunkStartOffsetSeconds: median(chunkOffsets),
+    medianCitationStartOffsetSeconds: median(citationOffsets),
+    p90CitationStartOffsetSeconds: percentile(citationOffsets, 0.9),
+    maximumCitationStartOffsetSeconds:
+      citationOffsets.length === 0 ? null : Math.max(...citationOffsets),
+    firstRelevantChunkCitationTargetsGoldSegmentRate: rate(
+      relevantChunkResults,
+      (result) => result.citationTargetsLabeledSegment,
+    ),
+    firstRelevantChunkCitationContainsGoldAnchorRate: rate(
+      relevantChunkResults,
+      (result) => result.citationContainsAnchorPhrase,
+    ),
+    validCitationLinkRateWhenEvidenceFound: rate(
+      relevantChunkResults,
+      (result) => result.citationLinkValid,
+    ),
+    duplicateCitationsRemoved: results.reduce(
+      (total, result) => total + result.duplicateCitationCount,
+      0,
+    ),
+  };
 }
 
 async function main(): Promise<void> {
@@ -102,43 +164,17 @@ async function main(): Promise<void> {
   ]);
   const { pool } = database;
   const createdSourceIds: number[] = [];
-  const queryResults: Array<{
-    sourceTitle: string;
-    videoId: string;
-    queryId: string;
-    question: string;
-    targetSeconds: number;
-    relevantRank: number | null;
-    hitAt1: boolean;
-    hitAt3: boolean;
-    hitAt5: boolean;
-    relevantChunkStartSeconds: number | null;
-    citationStartSeconds: number | null;
-    chunkStartOffsetSeconds: number | null;
-    citationStartOffsetSeconds: number | null;
-    citationSegmentFound: boolean;
-    citationLinkValid: boolean;
-    topMatches: Array<{
-      rank: number;
-      chunkIndex: number;
-      relevanceScore: number;
-      phraseMatch: boolean;
-      fullQueryMatch: boolean;
-      citationSegmentIndex: number | null;
-      citationStartSeconds: number | null;
-      citationPhraseMatch: boolean | null;
-      citationFullQueryMatch: boolean | null;
-      citationRelevanceScore: number | null;
-    }>;
-  }> = [];
+  const queryResults: EvaluationQueryResult[] = [];
   const sourceResults: Array<{
     title: string;
+    topic: string;
     url: string;
     segmentCount: number;
     chunkCount: number;
   }> = [];
   const unavailableSources: Array<{
     title: string;
+    topic: string;
     url: string;
     failureCode: string;
   }> = [];
@@ -185,6 +221,7 @@ async function main(): Promise<void> {
       if (processedSource?.status !== 'READY') {
         unavailableSources.push({
           title: sourceInput.title,
+          topic: sourceInput.topic,
           url: canonicalUrl,
           failureCode:
             processedSource?.failure?.code ?? processedSource?.status ?? 'SOURCE_MISSING',
@@ -200,34 +237,41 @@ async function main(): Promise<void> {
       );
       sourceResults.push({
         title: sourceInput.title,
+        topic: sourceInput.topic,
         url: canonicalUrl,
         segmentCount: stats.rows[0]!.segment_count,
         chunkCount: stats.rows[0]!.chunk_count,
       });
 
+      const transcriptSegments = await pool.query<{
+        segmentIndex: number;
+        startSeconds: number;
+        text: string;
+      }>(
+        'SELECT segment_index AS "segmentIndex", start_seconds AS "startSeconds", text ' +
+          'FROM source_transcript_segments WHERE source_id = $1 ORDER BY segment_index',
+        [created.source.id],
+      );
+
       for (const queryInput of sourceInput.queries) {
-        const targetSegment = await pool.query<{ start_seconds: number }>(
-          'SELECT start_seconds FROM source_transcript_segments ' +
-            "WHERE source_id = $1 AND LOWER(text) LIKE '%' || LOWER($2) || '%' " +
-            'ORDER BY segment_index OFFSET 0 LIMIT 1',
-          [created.source.id, queryInput.anchorTerm],
+        const selectedAnchor = selectEvidenceAnchor(
+          transcriptSegments.rows,
+          queryInput.anchorPhrase,
+          queryInput.anchorOccurrence ?? 0,
         );
-        if (!targetSegment.rows[0]) {
+        if (selectedAnchor.matchingSegmentCount > 1 && queryInput.anchorOccurrence === undefined) {
           throw new Error(
-            'The anchor ' +
-              queryInput.anchorTerm +
-              ' was not found in ' +
-              sourceInput.videoId +
-              '; refresh the evaluation labels.',
+            `Ambiguous anchor “${queryInput.anchorPhrase}” in ${sourceInput.videoId}; set anchorOccurrence explicitly.`,
           );
         }
-        const targetSeconds = targetSegment.rows[0].start_seconds;
+        const targetSegment = selectedAnchor.segment;
+        const targetSeconds = targetSegment.startSeconds;
         const rankedChunks = await retrieval.searchSourceChunksByText(
           created.source.id,
           queryInput.question,
           topK,
         );
-        const citations = rankedChunks.map(citation.mapRetrievedChunk);
+        const uniqueCitations = citation.mapRetrievedChunks(rankedChunks);
         const relevantIndex = rankedChunks.findIndex(
           (chunk) =>
             chunk.start_seconds !== null &&
@@ -236,7 +280,10 @@ async function main(): Promise<void> {
             chunk.end_seconds >= targetSeconds,
         );
         const relevantChunk = relevantIndex >= 0 ? rankedChunks[relevantIndex]! : null;
-        const relevantCitation = relevantIndex >= 0 ? citations[relevantIndex]! : null;
+        const relevantCitation = relevantChunk ? citation.mapRetrievedChunk(relevantChunk) : null;
+        const exactCitationIndex = rankedChunks.findIndex(
+          (chunk) => chunk.citation_segment_index === targetSegment.segmentIndex,
+        );
         const citationUrl = relevantCitation ? new URL(relevantCitation.href) : null;
         const citationTimestamp = citationUrl?.searchParams.get('t') ?? null;
         const parsedCitationTimestamp =
@@ -252,17 +299,35 @@ async function main(): Promise<void> {
         );
         const chunkStartSeconds = relevantChunk?.start_seconds ?? null;
         const citationStartSeconds = relevantCitation?.startSeconds ?? null;
+        const citationContainsAnchorPhrase = Boolean(
+          relevantCitation &&
+          normalizeEvidenceText(relevantCitation.excerpt).includes(
+            normalizeEvidenceText(queryInput.anchorPhrase),
+          ),
+        );
+        const exactCitationRank = exactCitationIndex >= 0 ? exactCitationIndex + 1 : null;
+        const evidenceChunkRank = relevantIndex >= 0 ? relevantIndex + 1 : null;
 
         queryResults.push({
           sourceTitle: sourceInput.title,
+          sourceTopic: sourceInput.topic,
           videoId: sourceInput.videoId,
           queryId: queryInput.id,
+          queryStyle: queryInput.style,
           question: queryInput.question,
+          anchorPhrase: queryInput.anchorPhrase,
+          anchorOccurrence: selectedAnchor.occurrence,
+          matchingAnchorSegments: selectedAnchor.matchingSegmentCount,
+          targetSegmentIndex: targetSegment.segmentIndex,
           targetSeconds,
-          relevantRank: relevantIndex >= 0 ? relevantIndex + 1 : null,
-          hitAt1: relevantIndex === 0,
-          hitAt3: relevantIndex >= 0 && relevantIndex < 3,
-          hitAt5: relevantIndex >= 0 && relevantIndex < 5,
+          evidenceChunkRank,
+          exactCitationRank,
+          evidenceHitAt1: evidenceChunkRank === 1,
+          evidenceHitAt3: evidenceChunkRank !== null && evidenceChunkRank <= 3,
+          evidenceHitAt5: evidenceChunkRank !== null && evidenceChunkRank <= 5,
+          exactCitationHitAt1: exactCitationRank === 1,
+          exactCitationHitAt3: exactCitationRank !== null && exactCitationRank <= 3,
+          exactCitationHitAt5: exactCitationRank !== null && exactCitationRank <= 5,
           relevantChunkStartSeconds: chunkStartSeconds,
           citationStartSeconds,
           chunkStartOffsetSeconds:
@@ -272,7 +337,13 @@ async function main(): Promise<void> {
           citationSegmentFound: Boolean(
             relevantChunk && relevantChunk.citation_segment_index !== null,
           ),
+          citationTargetsLabeledSegment:
+            relevantChunk?.citation_segment_index === targetSegment.segmentIndex,
+          citationContainsAnchorPhrase,
           citationLinkValid,
+          citationUrl: relevantCitation?.href ?? null,
+          uniqueCitationCount: uniqueCitations.length,
+          duplicateCitationCount: rankedChunks.length - uniqueCitations.length,
           topMatches: rankedChunks.map((chunk, index) => ({
             rank: index + 1,
             chunkIndex: chunk.chunk_index,
@@ -284,77 +355,79 @@ async function main(): Promise<void> {
             citationPhraseMatch: chunk.citation_phrase_match,
             citationFullQueryMatch: chunk.citation_full_query_match,
             citationRelevanceScore: chunk.citation_relevance_score,
+            targetsLabeledSegment: chunk.citation_segment_index === targetSegment.segmentIndex,
           })),
         });
       }
     }
 
-    const chunkStartOffsets = queryResults
-      .map((result) => result.chunkStartOffsetSeconds)
-      .filter((offset): offset is number => offset !== null);
-    const citationOffsets = queryResults
-      .map((result) => result.citationStartOffsetSeconds)
-      .filter((offset): offset is number => offset !== null);
-    const retrievedRelevantQueries = queryResults.filter((result) => result.relevantRank !== null);
-    const expectedQueries = queryResults.length;
+    const styles: EvaluationQueryStyle[] = ['lexical', 'paraphrase', 'definition'];
+    const queryStyleMetrics = Object.fromEntries(
+      styles.map((style) => [
+        style,
+        summarizeQueries(queryResults.filter((result) => result.queryStyle === style)),
+      ]),
+    );
+    const sourceMetrics = sourceResults.map((source) => ({
+      title: source.title,
+      topic: source.topic,
+      videoId: new URL(source.url).searchParams.get('v'),
+      ...summarizeQueries(
+        queryResults.filter(
+          (result) => result.videoId === new URL(source.url).searchParams.get('v'),
+        ),
+      ),
+    }));
     const report = {
       generatedAt: new Date().toISOString(),
+      datasetVersion: REAL_SOURCE_SEARCH_DATASET.version,
       retrieval:
-        'PostgreSQL English full-text search preserves the cover-density top-5 candidate set, then reranks it by best transcript-segment phrase/full-query match and segment rank; top 5 capped by application configuration',
-      citationStrategy: 'Best matching canonical transcript segment inside each retrieved chunk, with chunk-start fallback',
+        'PostgreSQL English full-text search preserves the original cover-density top-5 chunk candidates, then reranks them by query matches and matching caption-segment rank',
+      citationStrategy:
+        'Best matching canonical transcript segment inside each retrieved chunk, with chunk-start fallback',
       providerCalls: 0,
+      generatedAnswerSupport: 'not_evaluated_provider_free_retrieval_only',
       sourceCount: sourceResults.length,
       requestedSourceCount: sourcesToEvaluate.length,
       queryCount: queryResults.length,
       effectiveTopK: topK,
-      metrics: {
-        recallAt1:
-          expectedQueries === 0
-            ? null
-            : queryResults.filter((result) => result.hitAt1).length / expectedQueries,
-        recallAt3:
-          expectedQueries === 0
-            ? null
-            : queryResults.filter((result) => result.hitAt3).length / expectedQueries,
-        recallAt5:
-          expectedQueries === 0
-            ? null
-            : queryResults.filter((result) => result.hitAt5).length / expectedQueries,
-        meanReciprocalRank:
-          expectedQueries === 0
-            ? null
-            : queryResults.reduce(
-                (sum, result) => sum + (result.relevantRank === null ? 0 : 1 / result.relevantRank),
-                0,
-              ) / expectedQueries,
-        medianChunkStartOffsetSeconds: median(chunkStartOffsets),
-        medianCitationStartOffsetSeconds: median(citationOffsets),
-        segmentCitationRateWhenRelevantChunkFound:
-          retrievedRelevantQueries.length === 0
-            ? null
-            : retrievedRelevantQueries.filter((result) => result.citationSegmentFound).length /
-              retrievedRelevantQueries.length,
-        validCitationLinkRateWhenRelevantChunkFound:
-          retrievedRelevantQueries.length === 0
-            ? null
-            : retrievedRelevantQueries.filter((result) => result.citationLinkValid).length /
-              retrievedRelevantQueries.length,
-      },
+      metrics: summarizeQueries(queryResults),
+      queryStyleMetrics,
+      sourceMetrics,
       sources: sourceResults,
       unavailableSources,
       queries: queryResults,
       limitations: [
-        'Six manually labeled evidence anchors across three public English-captioned YouTube videos are a diagnostic sample, not a representative benchmark.',
-        'A hit means the chunk timestamp range contains a manually selected transcript anchor; this does not assess generated answer factuality.',
+        'The set uses 18 manually selected support phrases across six educational YouTube videos; it is broader than the prior sample but is still a small convenience benchmark.',
+        'Evidence recall means a chunk covers the labeled transcript segment. Exact citation support means a retrieved citation selects that exact labeled segment; this does not evaluate generated answer factuality.',
+        'The benchmark makes no provider calls and does not measure whether a human prefers the resulting seek point or whether a generated answer uses the evidence correctly.',
         'The current PostgreSQL lexical search can miss a semantically correct passage when the query uses different words.',
       ],
     };
     const outputPath = fileURLToPath(new URL('../../real-source-evaluation.json', import.meta.url));
     await writeFile(outputPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
-    process.stdout.write(JSON.stringify(report, null, 2) + '\n');
-    if (sourceResults.length < 2 || queryResults.length < 4) {
+    process.stdout.write(
+      JSON.stringify(
+        {
+          reportFile: 'real-source-evaluation.json',
+          datasetVersion: report.datasetVersion,
+          sourceCount: report.sourceCount,
+          requestedSourceCount: report.requestedSourceCount,
+          queryCount: report.queryCount,
+          providerCalls: report.providerCalls,
+          generatedAnswerSupport: report.generatedAnswerSupport,
+          metrics: report.metrics,
+          queryStyleMetrics: report.queryStyleMetrics,
+          sourceMetrics: report.sourceMetrics,
+          unavailableSources: report.unavailableSources,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    if (sourceResults.length < 4 || queryResults.length < 12) {
       throw new Error(
-        'Evaluation needs at least two available sources and four labeled queries; see the report for caption failures.',
+        'Evaluation needs at least four available sources and twelve labeled queries; see the report for caption or anchor failures.',
       );
     }
   } finally {

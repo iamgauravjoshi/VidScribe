@@ -553,6 +553,40 @@ The lateral segment lookups add query work proportional to the top-K chunks and 
 - [Retrieval and RAG service](../services/retrieval-rag-service.md)
 - [Real-source comparison](../evaluations/real-source-search-2026-11-03.md)
 
+## 2026-11-03 — Expand evidence-quality evaluation with exact support labels
+
+### Previous approach
+
+The real-source evaluation covered three captioned videos and six questions. It located targets using the first segment containing a broad keyword and scored retrieval by chunk time-range coverage. This measured candidate recall but did not show whether a citation selected the manually intended transcript moment.
+
+### Problem discovered
+
+Common/repeated keywords can point at the wrong transcript location, and a timestamp median can hide a poor tail. The first benchmark also could not distinguish a relevant chunk from a precise citation to the target segment. A provider answer would add cost and still would not automatically establish answer support.
+
+### New approach
+
+- Create dataset v2 with 18 questions across six public captioned YouTube videos and six educational topics.
+- Label each question with a short exact transcript phrase and an explicit segment occurrence when the phrase repeats.
+- Reject missing and ambiguous anchors rather than silently selecting a different segment.
+- Report chunk evidence recall separately from exact labeled-segment citation@1/3/5, timestamp median/p90/maximum, URL integrity, style groups, and source groups.
+- Keep the evaluation provider-free and opt-in; only synthetic database and browser cases run as required CI checks.
+- Add unit tests for case/whitespace normalization, explicit occurrences, and missing-label rejection.
+
+### Why this is better
+
+All six sources were captionable locally. The 18-query run found a labeled chunk in top five for 17/18 cases (`Recall@5 = 0.944`, `MRR = 0.676`). An exact citation to the labeled caption appeared in top five for 11/18 cases. Definition-style exact citation@5 was 1/4, compared with 7/9 lexical and 3/5 paraphrase. The median citation distance was 0 seconds, but p90 was 58.80 seconds and the maximum was 101 seconds. The report now makes retrieval, citation-target selection, and their limits visible separately.
+
+### Trade-offs and deferred work
+
+The dataset is broader but still a small convenience sample of public educational videos, all from YouTube. Exact segment identity is a strict proxy: an adjacent caption may still support an answer. No provider answer was generated, so factuality and human-perceived seeking were not measured. Next review the mismatch cases in playback and a small provider-backed answer sample before adjusting citation selection or deciding between another source type and semantic retrieval.
+
+### References
+
+- [Human-labeled evidence evaluation decision](../decisions/human-labeled-evidence-evaluation.md)
+- [Dataset v2](../../backend/scripts/real-source-search.dataset.ts)
+- [Provider-free evaluation runner](../../backend/scripts/evaluate-real-source-search.ts)
+- [Results and limitations](../evaluations/real-source-search-2026-11-03.md)
+
 ## Change entry template
 
 ```markdown

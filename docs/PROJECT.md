@@ -151,7 +151,7 @@ HTTP adapters live in controllers/routes; source workflow decisions live in appl
 package.json                    Root npm workspace scripts and dependency coordination
 scripts/dev.mjs                 Cross-platform launcher for backend and frontend dev processes
 scripts/test-e2e.mjs            Isolated test-database and Playwright browser-suite orchestration
-backend/scripts/                 Provider-free real-caption search/citation evaluation runner
+backend/scripts/                 Provider-free evaluation runner, versioned source/question dataset, and exact-anchor selector
 playwright.config.mts           Chromium project, temporary web servers, browser artifacts
 e2e/                            Browser scenarios and Playwright fixtures
 .github/workflows/ci.yml        Pull request build, lint, PostgreSQL, and provider-free browser gate
@@ -233,7 +233,7 @@ The migrations intentionally change legacy table names/status values while retai
 
 GitHub Actions runs `npm ci`, `npm run build`, `npm run lint`, the backend test suite with the isolated PostgreSQL database, and `npm run test:e2e` on every pull request. The browser job has no provider credentials or live AI calls. Playwright retains traces, screenshots, and its HTML report as a 14-day artifact when a run fails. The follow-up hosted run passed the build, lint, PostgreSQL suite (including migration 006), and all five Chromium scenarios. The separate real-source evaluation is opt-in because caption retrieval depends on YouTube availability. See the [CI validation decision](decisions/ci-validation-workflow.md).
 
-Run the small real-source search/citation baseline with `npm run eval:real-sources` only against a fresh isolated test database. It fetches captions for three public English videos, stores temporary test rows, measures labeled evidence retrieval and timestamp citation links, writes a JSON report, and removes its source fixtures. It never calls Gemini or another answer provider. The manual/label-triggered Actions workflow uploads the result for review. GitHub-hosted runners could not fetch captions for the selected sources; a local run succeeded on 2026-11-03. Its six-query results and limitations are recorded in the [evaluation report](evaluations/real-source-search-2026-11-03.md).
+Run the real-source search/citation evaluation with `npm run eval:real-sources` only against a fresh isolated test database. Dataset v2 fetches captions for six public English videos, stores temporary test rows, compares evidence-chunk recall with exact labeled-segment citation, writes a JSON review report, and removes its source fixtures. It never calls Gemini or another answer provider. The manual/label-triggered Actions workflow uploads the result for review; caption availability can vary by runner. The six-source, 18-query results and limitations are in the [evaluation report](evaluations/real-source-search-2026-11-03.md).
 
 - Backend compile: `cd backend && npm run build`
 - Backend unit tests: `cd backend && npm test`
@@ -252,7 +252,9 @@ Latest browser-suite verification on 2026-11-03: `npm run test:e2e` passed all 5
 
 Latest hosted pull-request validation on 2026-11-03: run [41609369491](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41609369491) passed build, lint, PostgreSQL integration, all 5 Playwright tests, and cleanup in 1m11s. The opt-in real-source run [41608747780](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41608747780) could not fetch captions for any of its three sources, so it produced no quality metrics. The later local evaluation succeeded; GitHub's caption-fetch failure is an environment limitation, not a retrieval-quality result.
 
-The synthetic retrieval fixture reports `Recall@3 = 0.75` across four labeled queries, including one expected lexical paraphrase miss. On the paired three-source, six-query real-source sample, segment-aware reranking changed Recall@1 from 0.333 to 0.500, Recall@3 from 0.667 to 0.833, and MRR from 0.547 to 0.672 while preserving Recall@5 at 1.00. Median absolute anchor-to-citation-start distance fell from 58.44 to 15.57 seconds; valid citation URLs remained 6/6. These small diagnostic scores do not establish answer factuality or generalize to all sources. Expand the labeled set and review citation support before deciding whether a second source adapter or semantic retrieval has higher value; see the [evaluation report](evaluations/real-source-search-2026-11-03.md).
+The synthetic fixture reports `Recall@3 = 0.75` across four queries. A paired three-source, six-query comparison improved MRR from 0.547 to 0.672 and reduced median anchor-to-citation-start distance from 58.44 to 15.57 seconds while preserving Recall@5 at 1.00. The expanded six-source, 18-query provider-free evaluation reports evidence Recall@5 = 0.944 and MRR = 0.676; exact citation to the labeled support segment appears in top five for 11/18 questions. The exact-segment citation rate is 7/9 for lexical questions, 3/5 for paraphrases, and 1/4 for definitions. Median citation-start distance is 0 seconds, but p90 is 58.80 and maximum 101 seconds. URL construction is valid for all 17 evidence-found cases. These are diagnostic retrieval/citation measures, not generated-answer truthfulness or human seek-quality results. Review the mismatches with the source player and provider-backed answers before changing ranking or choosing another source adapter; see the [evaluation report](evaluations/real-source-search-2026-11-03.md).
+
+Expanded evaluation verification on 2026-11-03: root build and frontend lint passed; the provider-free backend suite passed 23/23 including PostgreSQL integration and anchor-label unit cases; strict TypeScript and Prettier checks passed for the evaluation utility. Dataset v2 ingested all six caption sources and evaluated all 18 questions with zero provider calls. The generated JSON report is ignored by Git and contains case-level target/citation links for manual review.
 
 ## Documentation map
 
@@ -265,6 +267,7 @@ The synthetic retrieval fixture reports `Recall@3 = 0.75` across four labeled qu
 - [Automated browser suite decision](decisions/automated-browser-suite.md)
 - [GitHub Actions validation decision](decisions/ci-validation-workflow.md)
 - [Segment-aware reranking and citations decision](decisions/segment-aware-reranking-and-citations.md)
+- [Human-labeled evidence evaluation decision](decisions/human-labeled-evidence-evaluation.md)
 - [Source library API and service](services/source-library-api.md)
 - [Persisted chat conversation service](services/chat-conversation-service.md)
 - [Request context middleware](services/request-context.md)

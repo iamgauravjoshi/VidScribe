@@ -12,15 +12,15 @@ The retrieval repository owns PostgreSQL query/index details. RAG owns orchestra
 
 - Input: source ID and validated question string.
 - Output: answer text, citations, and provider/model provenance; provider/model are null when no transcript terms match and the fixed insufficient-context response is returned without an LLM call.
-- A citation contains a chunk ID, timestamp range, excerpt, and YouTube timestamp URL.
+- A citation contains a chunk ID, the selected transcript-segment timestamp range and excerpt when available, and a YouTube timestamp URL. Legacy chunk-only sources use the wider chunk range and text.
 
 ## Execution flow
 
 1. The chat service has already committed the user turn and pending assistant placeholder.
-2. `retrieval.repository` tokenizes the question with PostgreSQL `plainto_tsquery('english', ...)`, broadens the generated terms to OR matching, and ranks matching chunks with `ts_rank_cd`.
-3. SQL filters by `source_id`, returns at most configured `topK` results, and orders by rank then chunk index for deterministic ties.
+2. `retrieval.repository` creates OR, all-term, and phrase queries. PostgreSQL full-text search finds and ranks matching chunks within the source.
+3. SQL freezes the original chunk-level top-K candidate set, then reranks only those candidates using chunk and best matching transcript-segment phrase/full-query signals, normalized segment rank, original chunk rank, and chunk index for deterministic ties.
 4. With no hits, RAG returns an insufficient-context answer without calling Gemini or another answer provider.
-5. Otherwise, RAG builds a prompt from the question and matched excerpts, asks the configured provider, and maps those same excerpts to citations.
+5. Otherwise, RAG builds a prompt from the question and complete matched chunks, asks the configured provider, and maps each chunk to its best supporting transcript segment for the citation. Citations that point to the same segment through overlapping chunks are emitted once.
 6. The conversation service persists the answer and citations under the current fencing token.
 
 Transcript text and question search remain in PostgreSQL on the local machine. A cloud answer provider receives only the question and retrieved excerpts, which may be billable. No database transaction remains open during provider inference.
@@ -38,12 +38,12 @@ Retrieval uses one read statement and requires no transaction beyond the stateme
 
 ## Testing strategy
 
-The disposable PostgreSQL integration test verifies nullable-vector inserts, English stemming/matching, positive ranks, stopword-only no-match, source isolation, atomic replacement, and the four-case labeled `Recall@3` baseline. It also checks timestamp citations map to the exact retrieved source chunks. Provider calls are not needed to test retrieval; keep retrieval quality cases deterministic and provider-free before tuning OR matching, ranking, chunk size, or a future semantic fallback.
+The disposable PostgreSQL integration test verifies nullable-vector inserts, English stemming/matching, positive ranks, stopword-only no-match, source isolation, atomic replacement, the four-case labeled `Recall@3` baseline, phrase-match ranking against a repeated-term decoy, precise segment citations, and chunk-only legacy fallback. Unit coverage verifies segment citation deduplication for overlapping chunks. Provider calls are not needed to test retrieval; keep ranking and citation checks deterministic and provider-free.
 
-For product prioritization, the real-source evaluation runs the same PostgreSQL retrieval repository over up to three explicitly labeled public transcripts, with two questions per available source and a manually selected target segment for each question. It reports Recall@5, MRR, whether the cited chunk range covers the target, the distance between the target and citation start, and citation URL integrity. It uses the real caption-ingestion path but does not invoke an answer provider. Caption-unavailable sources are reported and skipped; the run requires at least two available sources and four queries to produce a usable baseline. This small sample does not measure generated answer factuality or represent the full range of source lengths and speakers.
+For product prioritization, the real-source evaluation runs the same PostgreSQL retrieval repository over up to three explicitly labeled public transcripts, with two questions per available source and a manually selected target segment for each question. It reports Recall@1/3/5, MRR, chunk-start distance, precise citation-start distance, segment citation availability, and URL integrity. The first paired comparison improved MRR from 0.547 to 0.672, preserved Recall@5 at 1.00, and reduced the median anchor-to-citation-start distance from 58.44 seconds to 15.57 seconds across the same six questions. It uses the real caption-ingestion path and no answer provider. This convenience sample does not measure answer factuality or represent the range of source lengths and speakers; see the [evaluation report](../evaluations/real-source-search-2026-11-03.md).
 
 ## Future evolution
 
 Full-text matching is appropriate for a local single-user transcript library but misses synonyms and paraphrases without overlapping terms. Consider a hybrid FTS/vector strategy only after measuring answer quality and latency. Any embedding path must preserve the user's transcript privacy choice, identify the embedding model per index generation, and use matching query vectors. Search languages should become source metadata before adding non-English inputs.
 
-See [PostgreSQL full-text search](postgres-full-text-search.md), [local retrieval decision](../decisions/local-postgres-full-text-retrieval.md), and the [provider service](llm-provider-service.md).
+See [PostgreSQL full-text search](postgres-full-text-search.md), [segment-aware ranking and citations decision](../decisions/segment-aware-reranking-and-citations.md), [local retrieval decision](../decisions/local-postgres-full-text-retrieval.md), and the [provider service](llm-provider-service.md).

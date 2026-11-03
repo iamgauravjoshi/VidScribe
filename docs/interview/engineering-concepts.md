@@ -160,3 +160,19 @@ The Playwright runner applies migrations to the repository's dedicated `vidscrib
 **Failure/concurrency:** Fixture inserts and worker-outcome transitions run inside database transactions; fixture source deletion happens even when a browser assertion fails. A test reset is restricted to the exact loopback `vidscribe_test` database. The suite owns its API/UI processes and only stops the PostgreSQL container when it started it.
 
 **Trade-off:** Tests are deterministic and cover the database/API/browser contract, but do not claim that YouTube permits live playback or that a real provider works. Worker concurrency and atomic publication remain in PostgreSQL integration tests. See [the browser-testing decision](../decisions/automated-browser-suite.md).
+
+## Why separate retrieval context from citation precision?
+
+**Short answer:** Retrieve and pass a useful overlapping chunk to the answer model, but cite the exact matching transcript segment so the user can seek closer to the evidence.
+
+**Deep answer:** PostgreSQL first finds and ranks chunks using its indexed English full-text search. VidScribe freezes the original top-K chunk candidates, then checks each candidate's canonical transcript segments for phrase, all-query-term, and normalized rank signals. It reranks only those candidates, so it can improve ordering but cannot recover evidence that candidate generation omitted. RAG still receives complete chunks for surrounding context; citation mapping uses the selected segment's own start, end, and text. Because this happens in one statement, the candidate and segment are read from the same database snapshot.
+
+**Example:** A chunk covers 12–45 seconds but the answer's supporting caption starts at 30 seconds. The model sees the complete chunk, while the citation opens the video at 30 seconds and displays that caption. An overlapping chunk that points to the same segment does not add a duplicate citation.
+
+**Failure and trade-off:** If a canonical segment is unavailable, a left-join fallback cites the chunk. Segment reranking adds per-candidate SQL work and remains lexical. The paired three-source/six-query sample improved MRR from 0.547 to 0.672 and reduced median anchor-to-citation distance from 58.44 to 15.57 seconds, while preserving Recall@5 at 1.00. It is too small to claim broad answer-quality improvement. See the [decision record](../decisions/segment-aware-reranking-and-citations.md) and [evaluation](../evaluations/real-source-search-2026-11-03.md).
+
+**Follow-up questions:**
+
+- *Why not make every transcript segment the RAG context?* A single caption can lose explanatory context. The chunk remains the generation context; a segment is the more precise evidence pointer.
+- *Can the reranker find evidence missing from the top five?* No. It intentionally retains the prior candidate boundary. A larger evaluation should show candidate-generation misses before we expand that work.
+- *Why no vector search?* The current data boundary keeps transcripts local, and the six-query sample does not establish that semantic retrieval is needed. A vector path would need an explicit transcript-transfer/runtime choice, index versioning, and broader evaluation.

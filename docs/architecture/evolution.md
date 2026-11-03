@@ -520,6 +520,39 @@ The adapter infers units because the dependency does not expose format metadata.
 - Pull request validation decision: ../decisions/ci-validation-workflow.md
 - Real-source retrieval evaluation: ../evaluations/real-source-search-2026-11-03.md
 
+## 2026-11-03 — Evidence reranking and precise citation timestamps
+
+### Previous approach
+
+PostgreSQL full-text search ranked overlapping transcript chunks and cited the start time and full text of each returned chunk. The real-source baseline found all six labeled passages within top five, but MRR was 0.547 and the median absolute distance from the labeled anchor to the citation start was 58.44 seconds.
+
+### Problem discovered
+
+Chunk context is useful to answer a question but broad as a seek target. A relevant caption may be well inside the matched chunk. Also, chunks matching all query terms or an ordered phrase were not distinguished from chunks whose repeated terms merely produced a higher cover-density score.
+
+### New approach
+
+- Keep the original chunk-level top-K set as the retrieval candidate boundary.
+- Use a phrase query, an all-question-terms query, and the existing OR query as ranking signals.
+- For each candidate, select the best matching canonical transcript segment inside its time range and rerank only the already-selected chunks.
+- Continue sending complete chunks to RAG while using segment text and exact times for citations; deduplicate captions repeated by overlapping chunks and retain chunk fallback for legacy sources.
+- Add PostgreSQL integration cases for phrase-versus-repeated-term ranking, precise segment mapping, and legacy fallback, plus unit coverage for citation deduplication.
+
+### Why this is better
+
+The paired real-source sample retained Recall@5 = 1.00, improved Recall@1 from 0.333 to 0.500, Recall@3 from 0.667 to 0.833, and MRR from 0.547 to 0.672. The median anchor-to-citation-start distance fell from 58.44 to 15.57 seconds. The transcript remains local; no embedding API, new service, reingestion, or schema migration was needed. Full chunks preserve surrounding answer context while narrower segment citations make the displayed evidence easier to inspect.
+
+### Trade-offs and deferred work
+
+The lateral segment lookups add query work proportional to the top-K chunks and only improve candidates already found by the original search. The evaluation has six hand-selected questions, so the metrics are evidence to guide the next experiment, not a product-wide quality claim. Expand and review labels, test support quality and actual seek UX, then decide whether to add another source type or semantic/hybrid retrieval. Do not add vector infrastructure on this sample alone.
+
+### References
+
+- [Segment-aware reranking and citations decision](../decisions/segment-aware-reranking-and-citations.md)
+- [PostgreSQL full-text search service](../services/postgres-full-text-search.md)
+- [Retrieval and RAG service](../services/retrieval-rag-service.md)
+- [Real-source comparison](../evaluations/real-source-search-2026-11-03.md)
+
 ## Change entry template
 
 ```markdown

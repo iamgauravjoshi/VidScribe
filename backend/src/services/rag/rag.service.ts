@@ -1,7 +1,7 @@
 // Implementing the actual RAG query
 
 import { searchSourceChunksByText } from '../../repositories/retrieval.repository.js';
-import { mapRetrievedChunk } from './citation.service.js';
+import { mapRetrievedChunks } from './citation.service.js';
 import { generateAnswer } from '../llm/llm.service.js';
 import { config } from '../../shared/config/index.js';
 import type { RetrievedChunkRow } from '../../types/chunk.type.js';
@@ -32,12 +32,18 @@ export async function answerQuestion(
     ...trace,
     retrieval: 'postgres_full_text',
     durationMs: Date.now() - retrievalStartedAt,
-    candidateCount: relevantChunks.length,
-    relevantCount: relevantChunks.length,
+    returnedCount: relevantChunks.length,
     topK: config.rag.topK,
-    scores: relevantChunks.map((chunk) => ({
+    scores: relevantChunks.map((chunk, index) => ({
+      rank: index + 1,
       chunkId: chunk.id,
-      relevanceScore: chunk.relevanceScore,
+      chunkRelevanceScore: chunk.relevanceScore,
+      phraseMatch: chunk.phrase_match,
+      fullQueryMatch: chunk.full_query_match,
+      hasSegmentCitation: chunk.citation_segment_index !== null,
+      citationPhraseMatch: chunk.citation_phrase_match,
+      citationFullQueryMatch: chunk.citation_full_query_match,
+      citationRelevanceScore: chunk.citation_relevance_score,
     })),
   });
 
@@ -52,13 +58,14 @@ export async function answerQuestion(
 
   // 4. Build prompt
   const prompt = buildPrompt(question, relevantChunks);
+  const citations = mapRetrievedChunks(relevantChunks);
 
   // 5. Ask LLM
   const generation = await generateAnswer(prompt, trace);
 
   return {
     answer: generation.text,
-    citations: relevantChunks.map(mapRetrievedChunk),
+    citations,
     providerId: generation.provider,
     modelId: generation.modelId,
   };

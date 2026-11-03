@@ -15,4 +15,13 @@ export interface RetrievedChunkRow {
   canonical_url: string;
   title: string | null;
   relevanceScore: number;
+  phrase_match: boolean;
+  full_query_match: boolean;
+  citation_segment_index: number | null;
+  citation_start_seconds: number | null;
+  citation_end_seconds: number | null;
+  citation_excerpt: string | null;
+  citation_phrase_match: boolean | null;
+  citation_full_query_match: boolean | null;
+  citation_relevance_score: number | null;
 }

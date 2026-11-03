@@ -438,7 +438,7 @@ The browser now exercises actual UI/API/database behavior in a clean, repeatable
 
 ### Trade-offs and deferred work
 
-The suite requires Docker Desktop and a one-time Playwright Chromium install. It does not verify live YouTube playback, caption retrieval, or answer-provider availability. One worker keeps test data progression sequential; parallel browser workers would need isolated databases or schema-level fixture isolation. CI configuration is deferred until the repository has a CI provider.
+The suite requires Docker Desktop and a one-time Playwright Chromium install. It does not verify live YouTube playback, caption retrieval, or answer-provider availability. One worker keeps test data progression sequential; parallel browser workers would need isolated databases or schema-level fixture isolation. At the time this suite was added, CI had not yet been configured; the following evolution entry records its addition.
 
 ### Verification
 
@@ -451,6 +451,41 @@ The suite requires Docker Desktop and a one-time Playwright Chromium install. It
 - [Browser scenarios](../../e2e/source-evidence.spec.ts)
 - [Test runner](../../scripts/test-e2e.mjs)
 - [Transcript service testing strategy](../services/transcript-service.md#testing-strategy)
+
+## 2026-11-03 — Automated GitHub Actions validation
+
+### Previous approach
+
+Build, lint, PostgreSQL lifecycle scenarios, and browser checks were available as local commands, but there was no pull request workflow to run them consistently.
+
+### Problem discovered
+
+A developer could merge a change that compiled but broke PostgreSQL publication/retry behavior or the real transcript UI/API flow. Running tests against real providers would add secrets, cost, and external availability to routine code review.
+
+### New approach
+
+- Add `.github/workflows/ci.yml`, triggered for each pull request, pushes to `main`, and manual dispatch.
+- Use Node 24, install the locked npm workspaces with `npm ci`, and run root build plus frontend lint.
+- Start the dedicated test Compose database, configure only its `vidscribe_test` credentials, and run backend tests followed by the provider-free Playwright Chromium suite.
+- Upload Playwright screenshots, traces, and its HTML report for 14 days when the job fails. Stop the test database with an unconditional cleanup step.
+- Pin GitHub actions to full commit SHAs and grant the workflow read-only repository permissions.
+
+The first hosted run failed during the backend build: the backend used TypeScript 7's platform-specific native compiler, but the lockfile created on Windows contained the Windows binary and omitted the Linux binary used by GitHub's Ubuntu runner. No database or Playwright checks ran on that attempt. The backend has no TypeScript 7-specific language requirement, so its compiler was aligned to TypeScript 6.0.3, already used by the frontend; the platform-specific package entries were removed from the lockfile. A clean local `npm ci`, root build, frontend lint, and backend tests passed after this fix. The hosted rerun remains the reliability check.
+
+### Why this is better
+
+Every pull request checks the same code paths developers can run locally, including PostgreSQL transactions and actual browser-to-API behavior. The provider and YouTube boundaries stay outside CI, so the merge check needs no API keys and does not incur model usage. Failure artifacts make browser regressions diagnosable without reproducing every runner environment locally.
+
+### Trade-offs and deferred work
+
+Hosted browser/database runs take longer and cost more runner time than build-only CI. The workflow reports a check but does not alter repository branch protection; a maintainer must require the named check in branch rules if merge blocking is desired. A green local run does not prove the hosted workflow itself works, so a successful GitHub rerun is the acceptance criterion. Real-source search/citation evaluation is deferred until that hosted run succeeds; it should inform whether search changes or a second source type is the more valuable next product capability.
+
+### References
+
+- [CI validation decision](../decisions/ci-validation-workflow.md)
+- [Workflow](../../.github/workflows/ci.yml)
+- [Isolated PostgreSQL target](../../docker-compose.test.yml)
+- [Browser-suite decision](../decisions/automated-browser-suite.md)
 
 ## Change entry template
 

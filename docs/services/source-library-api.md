@@ -16,12 +16,23 @@ Routes and controllers own HTTP details. Validators own input contract checks. `
 | `POST /api/sources` | JSON `{ "url": "..." }`; validate and canonicalize supported YouTube URL. | `{ source, created }`; 202 for a newly queued source, 200 for an existing identity. |
 | `GET /api/sources` | No body. | `{ sources: SourceDto[] }`, ordered by latest update. |
 | `GET /api/sources/:sourceId` | Positive safe integer ID. | `{ source: SourceDto }`. |
+| `GET /api/sources/:sourceId/transcript` | Ready source; optional `limit` (1–200), `cursor`, `query` (up to 200 chars), or `around` seconds. Cursor and timestamp lookup are mutually exclusive. | `{ transcript }` with status, provenance, segment count, timestamped segments, and `nextCursor`. Search returns matching segments in transcript order. |
+| `GET /api/sources/:sourceId/transcript/export?format={txt,srt,vtt}` | Ready source and one supported export format. | UTF-8 download response with a fixed source-ID filename. Export fails clearly if transcript data is not ready or incomplete. |
+| `POST /api/sources/:sourceId/transcript/rebuild` | Ready source whose transcript data is missing or retryably failed. | 202 with `QUEUED`/`PROCESSING`; 200 if another request already completed the transcript. |
 | `GET /api/sources/:sourceId/conversation` | Positive safe integer ID. | `{ conversation: { sourceId, messages } }`, ordered by persisted message ID. |
 | `POST /api/sources/:sourceId/retry` | No body. Only a retryable failed source may be requeued. | 202 with the same source identity. Active duplicate retry requests return current state. |
-| `DELETE /api/sources/:sourceId` | Positive safe integer ID. | 204; deletion cascades to job, chunks, conversation, and messages. |
+| `DELETE /api/sources/:sourceId` | Positive safe integer ID. | 204; deletion cascades to job, transcript metadata/segments, chunks, conversation, and messages. |
 | `POST /api/sources/:sourceId/chat` | JSON `{ "question": "...", "requestId": "<uuid>" }`; source must be ready. | `{ turn }`; HTTP 200 for completed, HTTP 202 when that same turn is already pending. |
 
 Error responses use the shared shape `{ success: false, error: { code, message, details? } }`. The browser relies on stable error codes for correcting a URL and handling unavailable sources; raw stack traces and provider bodies are not sent as UI copy.
+
+## Transcript data and reading
+
+`source_transcripts` stores the current transcript's status, language, retrieval method, segment count, and fetch time. `source_transcript_segments` stores normalized caption text and timestamps per original segment. The transcript API does not expose chunk rows: chunks include deliberate overlap and exist only as a retrieval index. Search uses PostgreSQL English full-text search and returns results in source order. Paging is bounded to 200 segments; timestamp lookup loads a page around the nearest segment.
+
+The export endpoint accepts only `txt`, `srt`, or `vtt`, returns UTF-8 with an attachment filename based on the numeric source ID, and loads the full saved transcript for formatting. The local export is separate from answer-provider traffic and makes no model request.
+
+Existing `READY` sources from before transcript persistence remain ready for Q&A. Their first transcript request reports `NOT_AVAILABLE`; the user may request a refresh. The refresh is a distinct operation on the existing durable job. While it runs, source status stays `READY` and current chunks remain queryable. A successful final transaction replaces transcript segments and chunks. A failure changes only transcript-refresh status, preserving the existing source and conversation.
 
 ## Duplicate and retry behavior
 
@@ -52,12 +63,14 @@ The response may be lost after the transaction commits. Reusing the same request
 - Reusing a turn UUID with different question text returns `IDEMPOTENCY_KEY_REUSED`.
 - A live pending chat turn returns 202 rather than starting duplicate model inference.
 - Chat retries after a persisted non-retryable failure return `ANSWER_RETRY_NOT_ALLOWED`.
+- Transcript reads require a ready source. A legacy ready source without persisted segments can request a transcript refresh; concurrent refresh requests return the current operation instead of resetting its lease.
+- Transcript search accepts bounded input and returns segments in chronological order. Export formats are allowlisted; arbitrary filenames and formats are not accepted.
 - Database failures are serialized by error middleware; source/job mutations use repository transactions.
 - Source deletion locks the job before deleting the source, matching worker lock ordering. `ON DELETE CASCADE` removes the job, chunks, conversation, and messages.
 
 ## Current limits
 
-There is no auth or workspace ownership because V1 is local-first and single-user. There is one conversation per source, with no named-conversation management or message editing. Answer execution remains synchronous through the POST request; no independent answer worker, push notifications, or automatic recovery scheduler exists. Source titles are currently optional and the UI falls back to the YouTube ID. API routes support only the YouTube adapter; a second source type should add a provider adapter and source-specific input validation without changing library concepts.
+There is no auth or workspace ownership because V1 is local-first and single-user. There is one conversation per source, with no named-conversation management or message editing. The transcript can be viewed, searched, and exported, but not edited. Answer execution remains synchronous through the POST request; no independent answer worker, push notifications, or automatic recovery scheduler exists. Source titles are currently optional and the UI falls back to the YouTube ID. API routes support only the YouTube adapter; a second source type should add a provider adapter and source-specific input validation without changing library concepts.
 
 The HTTP server binds to `127.0.0.1` and does not enable permissive CORS. This is part of the current local-only boundary, not a substitute for authentication if the API is later exposed remotely.
 

@@ -28,12 +28,22 @@ interface YouTubeTranscriptResponse {
 }
 
 export function normalizeTranscript(transcript: YouTubeTranscriptResponse[]): TranscriptSegment[] {
-  return transcript.map((item) => ({
-    text: item.text,
-    start: item.offset,
-    duration: item.duration,
-    lang: item.lang,
-  }));
+  return transcript
+    .filter((item) =>
+      typeof item.text === 'string'
+      && item.text.trim().length > 0
+      && Number.isFinite(item.offset)
+      && item.offset >= 0
+      && Number.isFinite(item.duration)
+      && item.duration >= 0,
+    )
+    .map((item) => ({
+      text: item.text.trim(),
+      start: item.offset,
+      duration: item.duration,
+      lang: item.lang,
+    }))
+    .sort((left, right) => left.start - right.start);
 }
 
 export async function getTranscript(url: string) {

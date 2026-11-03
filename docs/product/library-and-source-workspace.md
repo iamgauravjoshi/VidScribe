@@ -15,7 +15,10 @@ This document is both the UX contract and a record of the current UI. The matrix
 | Failed and retry | Implemented. Retry appears only when `failure.retryable` is true and reuses the same source/job. |
 | Remove source | Implemented with confirmation; job/chunks are deleted through database cascades. |
 | Conversation history | Implemented as one persisted conversation per source. Reopening a ready source restores user/assistant messages, answer status, citations, and retry state. |
-| Video preview | Current UI uses a product preview card and external YouTube link; it does not embed a player or seek citations in-app. |
+| Evidence workspace | Implemented with a user-initiated YouTube IFrame player, paginated transcript reader/search, timestamp seeking, TXT/SRT/VTT export, and source-scoped Q&A. |
+| Citation navigation | Selecting a citation seeks the embedded player and loads the matching transcript context. Every citation retains an external YouTube link as a fallback. |
+| Older ready sources | Sources whose transcript segments predate migration 005 keep working for Q&A. The user can prepare the transcript in the background without interrupting the current ready state. |
+| Transcript refresh failure | A failed refresh is shown within the transcript panel and may be retried when the server marks it retryable; the source and saved conversation remain ready. |
 | Polling optimization | The workspace polls persisted state while queued/processing. Visibility-aware backoff is deferred. |
 
 The implemented screen components are `frontend/src/components/LibraryPage.tsx`, `AddSourceDialog.tsx`, and `SourceWorkspace.tsx`; API behavior is documented in [the source API guide](../services/source-library-api.md).
@@ -51,7 +54,7 @@ The source list is the durable navigation surface, not chat history. Each row sh
 
 ### Narrow screens
 
-Collapse the library into a drawer opened from the page header. Keep the selected source title and state visible. Stack the source preview and conversation vertically; keep the message composer reachable without horizontal scrolling. Do not hide processing or error text in hover-only controls.
+Collapse the library into a drawer opened from the page header. Keep the selected source title and state visible. Stack the evidence column and conversation vertically; keep the message composer reachable without horizontal scrolling. Do not hide processing or error text in hover-only controls.
 
 ### Global dependency states
 
@@ -110,7 +113,7 @@ For V1, use status polling with a bounded interval/backoff and stop or slow poll
 
 ### Processing acceptance
 
-Submitting a source returns promptly with an accepted source/job identity. Progress survives navigation and refresh. The library row and workspace header agree on status. A ready state is shown only after usable chunks and their local full-text index are committed.
+Submitting a source returns promptly with an accepted source/job identity. Progress survives navigation and refresh. The library row and workspace header agree on status. A ready state for new ingestion is shown only after usable transcript segments, chunks, their local full-text index, and the completed job are committed together. A legacy transcript refresh is independent: its source stays ready and the existing chunks remain available until the replacement transcript and index commit atomically.
 
 ## Screen 4 — Ready source workspace
 
@@ -120,16 +123,18 @@ Submitting a source returns promptly with an accepted source/job identity. Progr
 ┌──────────────────────┬───────────────────────────────────────────────────┐
 │ Library sidebar      │ Source title · Ready       Open on YouTube · Menu │
 │                      ├────────────────────────┬──────────────────────────┤
-│ Selected source      │ Video preview /        │ Conversation              │
-│                      │ transcript details     │                            │
-│                      │                        │ Answer with sources        │
-│                      │ Open video at timestamp│                            │
+│ Selected source      │ Video player           │ Conversation              │
 │                      ├────────────────────────┤                            │
-│                      │ Source excerpt panel   │ Ask about this video...    │
+│                      │ Transcript · Search    │ Answer with sources        │
+│                      │ Export · Timestamps    │ Ask about this video...    │
 └──────────────────────┴────────────────────────┴──────────────────────────┘
 ```
 
-The source preview can be a YouTube embed when embedding is allowed. If the video disallows embedding, show a useful preview card and `Open on YouTube` link instead. The user must still be able to use timestamp citations in either case. Keep the conversation and composer as the main workspace; source details should support it rather than crowd it.
+The player is loaded only after an explicit user action or citation selection because loading it contacts YouTube. If the video disallows embedding or the player API cannot load, keep the transcript and chat usable and retain `Open on YouTube` links. Transcript timestamps and answer citations select a moment in the player and highlight its transcript passage. On narrow screens, the evidence column and conversation stack vertically; transcript reading remains in its own bounded scroll area.
+
+Transcript segments are canonical source data. Search chunks remain derived retrieval data; the UI must not reconstruct a transcript from overlapping chunks. New ingestion publishes segments, chunks, transcript provenance, and the source-ready transition in one fenced transaction.
+
+Older `READY` sources have chunks but no saved segments. Their `Prepare transcript` action queues a `TRANSCRIPT_REFRESH` operation using the existing PostgreSQL job row. The source remains `READY` and can continue answering questions while refresh runs. A refresh failure belongs to transcript status and does not invalidate the old index or conversation.
 
 ### New conversation state
 
@@ -187,10 +192,10 @@ Every answer with retrieved evidence has a `Sources` area immediately below that
 
 - A stable display number or short label within that answer.
 - A start timestamp and, where useful, an end timestamp.
-- A short transcript excerpt so the user can judge relevance before opening it.
+- A short transcript excerpt so the user can judge relevance before selecting the moment.
 - A link built by the application from the canonical YouTube video ID and timestamp, not a URL invented by the model.
 
-Selecting a citation opens the YouTube video at the cited time in a new tab. If the embedded player is available and the final UI supports seeking, the same action may seek the in-app player instead. Keyboard users must be able to activate each citation and the link should communicate its destination to assistive technology.
+Selecting a citation seeks the user-initiated embedded player and highlights the nearest transcript segment. A separate `Open on YouTube` link remains available for every timestamped citation. Keyboard users must be able to activate both controls and each link/button must communicate its action to assistive technology.
 
 The API should return a typed citation DTO, for example:
 
@@ -216,7 +221,7 @@ If no retrieved chunk meets the relevance policy, show a distinct assistant resp
 
 ### Citation selection state
 
-When the embedded player is available, selecting a citation seeks it to the start time and highlights that citation card while selected. If playback is blocked or unavailable, keep the citation link usable and show the external-open fallback. The citation remains attached to the answer even if playback fails.
+When the embedded player is available, selecting a citation seeks it to the start time and highlights the matching transcript segment. If playback is blocked or unavailable, keep the citation link usable and show the external-open fallback. The citation remains attached to the answer even if playback fails.
 
 ## State and transition map
 

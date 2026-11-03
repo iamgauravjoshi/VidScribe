@@ -10,8 +10,8 @@ const repositoryDirectory = resolve(frontendDirectory, '..');
 export default defineConfig(({ mode }) => {
   // The app-level .env lives beside backend/ and frontend/, not inside frontend/.
   const env = loadEnv(mode, repositoryDirectory, '');
-  const backendPort = Number(env.BACKEND_PORT) || 8000;
-  const frontendPort = Number(env.FRONTEND_PORT) || 5173;
+  const backendPort = Number(process.env.BACKEND_PORT || env.BACKEND_PORT) || 8000;
+  const frontendPort = Number(process.env.FRONTEND_PORT || env.FRONTEND_PORT) || 5173;
 
   return {
     envDir: repositoryDirectory,

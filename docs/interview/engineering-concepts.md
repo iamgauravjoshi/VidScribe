@@ -144,3 +144,19 @@ VidScribe sends a short prompt to the selected model before changing persisted s
 ## Why keep the theme preference in the browser?
 
 The current app has one local user and no account/profile service. Light/dark choice is presentation state, so browser local storage is enough and avoids a database migration or settings API for a preference. A future account/workspace system could move the preference to a user profile if cross-device synchronization becomes useful.
+
+## Why store transcript segments separately from retrieval chunks?
+
+Transcript segments preserve the source's original order and timing. Retrieval chunks deliberately overlap to improve recall, so using them as a readable transcript would repeat boundary text and make exports inaccurate. VidScribe stores canonical caption segments in PostgreSQL and stores chunks as a separate derived index. Their replacement and the ready-state transition share one transaction.
+
+Older ready sources do not have original segments. We do not infer them from chunks or fetch every source during a schema migration. The user can request a refresh; the source stays ready for Q&A while it runs, and a failure leaves the old index intact. See [the transcript decision](../decisions/canonical-transcript-and-evidence-workspace.md) for the transaction, concurrency scenarios, and alternatives.
+
+## How do you make browser tests repeatable without mocking the API?
+
+**Short answer:** Run the real API and frontend against an isolated PostgreSQL test database, seed known source/transcript rows, and stub only the external YouTube player boundary.
+
+The Playwright runner applies migrations to the repository's dedicated `vidscribe_test` database, clears its source rows after checking the exact database name and loopback host, and starts the API and Vite on test-only ports. The test API omits the ingestion worker so queued, failed, retry, and ready outcomes can be set directly in PostgreSQL without network-dependent caption retrieval. The browser still calls the real transcript endpoints, so search, cursor paging, exports, UI polling, and status rendering are exercised end to end. A small IFrame API stub records the timestamp passed to `seekTo` and can emit an embed error.
+
+**Failure/concurrency:** Fixture inserts and worker-outcome transitions run inside database transactions; fixture source deletion happens even when a browser assertion fails. A test reset is restricted to the exact loopback `vidscribe_test` database. The suite owns its API/UI processes and only stops the PostgreSQL container when it started it.
+
+**Trade-off:** Tests are deterministic and cover the database/API/browser contract, but do not claim that YouTube permits live playback or that a real provider works. Worker concurrency and atomic publication remain in PostgreSQL integration tests. See [the browser-testing decision](../decisions/automated-browser-suite.md).

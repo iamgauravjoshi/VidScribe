@@ -22,6 +22,26 @@ export interface Source {
   updatedAt: string;
 }
 
+export type TranscriptStatus = 'NOT_AVAILABLE' | 'PROCESSING' | 'READY' | 'FAILED';
+
+export interface TranscriptSegment {
+  segmentIndex: number;
+  startSeconds: number;
+  durationSeconds: number;
+  text: string;
+}
+
+export interface SourceTranscript {
+  status: TranscriptStatus;
+  languageCode: string | null;
+  retrievalMethod: 'youtube_captions' | null;
+  segmentCount: number;
+  fetchedAt: string | null;
+  failure: { code: string; message: string; retryable: boolean } | null;
+  segments: TranscriptSegment[];
+  nextCursor: number | null;
+}
+
 export interface AnswerCitation {
   id: string;
   startSeconds: number | null;

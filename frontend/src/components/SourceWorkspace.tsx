@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 
 import { ChatInput } from './ChatInput';
 import { ChatWindow } from './ChatWindow';
@@ -12,6 +12,8 @@ import {
   retrySource,
 } from '../services/api';
 import type { ChatMessage, IngestionPhase, Source } from '../types/types';
+
+const TranscriptPanel = lazy(() => import('./TranscriptPanel'));
 
 interface Props {
   sourceId: number;
@@ -111,6 +113,7 @@ export function SourceWorkspace({
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [conversationPollKey, setConversationPollKey] = useState(0);
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
+  const [citationRequest, setCitationRequest] = useState<{ seconds: number; requestId: number } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -345,6 +348,10 @@ export function SourceWorkspace({
     if (resumable || retryable) void submitQuestion(userMessage.content, turnId);
   };
 
+  const handleCitationSelect = (seconds: number) => {
+    setCitationRequest((current) => ({ seconds, requestId: (current?.requestId ?? 0) + 1 }));
+  };
+
   if (loading && !source) {
     return (
       <section className="page source-loading" role="status">
@@ -471,25 +478,15 @@ export function SourceWorkspace({
 
       {source.status === 'READY' && (
         <div className="ready-layout">
-          <aside className="ready-source-panel">
-            <div className="video-preview panel">
-              <div className="video-preview-art" aria-hidden="true">
-                <span className="video-play">▶</span>
-              </div>
-              <div className="video-preview-copy">
-                <div className="eyebrow">SOURCE VIDEO</div>
-                <h2>{title}</h2>
-                <p>Transcript indexed and ready for questions.</p>
-                <a className="button button-secondary" href={source.canonicalUrl} rel="noreferrer" target="_blank">
-                  Watch on YouTube <span aria-hidden="true">↗</span>
-                </a>
-              </div>
-            </div>
-            <div className="local-note">
-              <span aria-hidden="true">✦</span>
-              Answers are grounded in this video’s transcript.
-            </div>
-          </aside>
+          <Suspense fallback={<div className="conversation-loading panel" role="status">Preparing source workspace…</div>}>
+            <TranscriptPanel
+              canonicalUrl={source.canonicalUrl}
+              citationRequest={citationRequest}
+              sourceId={source.id}
+              title={title}
+              videoId={source.externalId}
+            />
+          </Suspense>
 
           <section aria-label="Questions about this video" className="conversation-panel panel">
             {conversationError && (
@@ -513,7 +510,7 @@ export function SourceWorkspace({
                 Loading saved conversation…
               </div>
             ) : (
-              <ChatWindow messages={messages} onRetry={retryQuestion} />
+              <ChatWindow messages={messages} onCitationSelect={handleCitationSelect} onRetry={retryQuestion} />
             )}
             <ChatInput disabled={composerDisabled} onSend={(question) => void submitQuestion(question)} />
             <div className="conversation-notice">

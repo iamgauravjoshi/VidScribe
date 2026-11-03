@@ -5,6 +5,15 @@ import { createChunkWithClient, type CreateChunkInput } from './chunk.repository
 import { AppError, ErrorCode } from '../shared/errors/index.js';
 import { SourceStatus, type SourceRecord, type SourceType } from '../types/source.type.js';
 import { findSourceByIdWithClient } from './source.repository.js';
+import {
+  getTranscriptMetadataWithClient,
+  markTranscriptRefreshFailedWithClient,
+  markTranscriptRefreshQueuedWithClient,
+  persistTranscriptWithClient,
+} from './transcript.repository.js';
+import type { TranscriptSegment } from '../types/transcript.type.js';
+
+export type IngestionOperation = 'INGEST_SOURCE' | 'TRANSCRIPT_REFRESH';
 
 export interface ClaimedIngestionJob {
   id: number;
@@ -15,6 +24,7 @@ export interface ClaimedIngestionJob {
   title: string | null;
   attemptCount: number;
   leaseToken: string;
+  operation: IngestionOperation;
 }
 
 interface CandidateJobRow {
@@ -26,6 +36,7 @@ interface CandidateJobRow {
   external_id: string;
   canonical_url: string;
   title: string | null;
+  operation: IngestionOperation;
 }
 
 export class ProcessingLeaseLostError extends Error {
@@ -50,7 +61,8 @@ export async function claimNextIngestionJob(
           s.source_type,
           s.external_id,
           s.canonical_url,
-          s.title
+          s.title,
+          j.operation
         FROM ingestion_jobs AS j
         INNER JOIN sources AS s ON s.id = j.source_id
         WHERE (
@@ -82,18 +94,26 @@ export async function claimNextIngestionJob(
         `,
         [candidate.id],
       );
-      await client.query(
-        `
-          UPDATE sources
-          SET processing_status = 'FAILED',
-              processing_error_code = 'INGESTION_ATTEMPTS_EXHAUSTED',
-              processing_error_message = 'Processing stopped after repeated worker interruptions. Retry to try again.',
-              processing_retryable = TRUE,
-              updated_at = NOW()
-          WHERE id = $1
-        `,
-        [candidate.source_id],
-      );
+      if (candidate.operation === 'TRANSCRIPT_REFRESH') {
+        await markTranscriptRefreshFailedWithClient(client, candidate.source_id, {
+          code: 'INGESTION_ATTEMPTS_EXHAUSTED',
+          message: 'Transcript refresh stopped after repeated worker interruptions. Retry to try again.',
+          retryable: true,
+        });
+      } else {
+        await client.query(
+          `
+            UPDATE sources
+            SET processing_status = 'FAILED',
+                processing_error_code = 'INGESTION_ATTEMPTS_EXHAUSTED',
+                processing_error_message = 'Processing stopped after repeated worker interruptions. Retry to try again.',
+                processing_retryable = TRUE,
+                updated_at = NOW()
+            WHERE id = $1
+          `,
+          [candidate.source_id],
+        );
+      }
 
       return null;
     }
@@ -116,19 +136,21 @@ export async function claimNextIngestionJob(
       [candidate.id, attemptCount, leaseToken, workerId, leaseDurationMs],
     );
 
-    await client.query(
-      `
-        UPDATE sources
-        SET processing_status = 'PROCESSING',
-            processing_phase = 'FETCHING_TRANSCRIPT',
-            processing_error_code = NULL,
-            processing_error_message = NULL,
-            processing_retryable = FALSE,
-            updated_at = NOW()
-        WHERE id = $1
-      `,
-      [candidate.source_id],
-    );
+    if (candidate.operation === 'INGEST_SOURCE') {
+      await client.query(
+        `
+          UPDATE sources
+          SET processing_status = 'PROCESSING',
+              processing_phase = 'FETCHING_TRANSCRIPT',
+              processing_error_code = NULL,
+              processing_error_message = NULL,
+              processing_retryable = FALSE,
+              updated_at = NOW()
+          WHERE id = $1
+        `,
+        [candidate.source_id],
+      );
+    }
 
     return {
       id: candidate.id,
@@ -139,6 +161,7 @@ export async function claimNextIngestionJob(
       title: candidate.title,
       attemptCount,
       leaseToken,
+      operation: candidate.operation,
     };
   });
 }
@@ -149,9 +172,9 @@ export async function updateIngestionJobPhase(
   phase: 'FETCHING_TRANSCRIPT' | 'CHUNKING' | 'INDEXING' | 'PERSISTING',
 ): Promise<boolean> {
   return withTransaction(async (client) => {
-    const job = await client.query<{ source_id: number }>(
+    const job = await client.query<{ source_id: number; operation: IngestionOperation }>(
       `
-        SELECT source_id
+        SELECT source_id, operation
         FROM ingestion_jobs
         WHERE id = $1 AND lease_token = $2 AND status = 'PROCESSING'
         FOR UPDATE
@@ -168,10 +191,12 @@ export async function updateIngestionJobPhase(
       'UPDATE ingestion_jobs SET phase = $2, updated_at = NOW() WHERE id = $1',
       [jobId, phase],
     );
-    await client.query(
-      'UPDATE sources SET processing_phase = $2, updated_at = NOW() WHERE id = $1',
-      [sourceId, phase],
-    );
+    if (job.rows[0].operation === 'INGEST_SOURCE') {
+      await client.query(
+        'UPDATE sources SET processing_phase = $2, updated_at = NOW() WHERE id = $1',
+        [sourceId, phase],
+      );
+    }
 
     return true;
   });
@@ -202,15 +227,21 @@ export async function completeIngestionJob(
   jobId: number,
   leaseToken: string,
   chunks: CreateChunkInput[],
+  transcript: TranscriptSegment[],
+  languageCode: string,
 ): Promise<void> {
   if (chunks.length === 0) {
     throw new Error('A source cannot be marked ready without indexed chunks.');
   }
 
+  if (transcript.length === 0) {
+    throw new Error('A source cannot be marked ready without transcript segments.');
+  }
+
   await withTransaction(async (client) => {
-    const job = await client.query<{ source_id: number }>(
+    const job = await client.query<{ source_id: number; operation: IngestionOperation }>(
       `
-        SELECT source_id
+        SELECT source_id, operation
         FROM ingestion_jobs
         WHERE id = $1 AND lease_token = $2 AND status = 'PROCESSING'
         FOR UPDATE
@@ -230,6 +261,8 @@ export async function completeIngestionJob(
       await createChunkWithClient(client, chunk);
     }
 
+    await persistTranscriptWithClient(client, sourceId, transcript, languageCode);
+
     const source = await client.query(
       `
         UPDATE sources
@@ -239,10 +272,14 @@ export async function completeIngestionJob(
             processing_error_message = NULL,
             processing_retryable = FALSE,
             updated_at = NOW()
-        WHERE id = $1 AND processing_status = 'PROCESSING'
+        WHERE id = $1
+          AND processing_status = CASE
+            WHEN $2 = 'TRANSCRIPT_REFRESH' THEN 'READY'
+            ELSE 'PROCESSING'
+          END
         RETURNING id
       `,
-      [sourceId],
+      [sourceId, job.rows[0].operation],
     );
 
     if (source.rowCount !== 1) {
@@ -277,9 +314,9 @@ export async function failIngestionJob(
   failure: { code: string; message: string; retryable: boolean },
 ): Promise<boolean> {
   return withTransaction(async (client) => {
-    const job = await client.query<{ source_id: number }>(
+    const job = await client.query<{ source_id: number; operation: IngestionOperation }>(
       `
-        SELECT source_id
+        SELECT source_id, operation
         FROM ingestion_jobs
         WHERE id = $1 AND lease_token = $2 AND status = 'PROCESSING'
         FOR UPDATE
@@ -306,19 +343,23 @@ export async function failIngestionJob(
       `,
       [jobId],
     );
-    await client.query(
-      `
-        UPDATE sources
-        SET processing_status = 'FAILED',
-            processing_phase = NULL,
-            processing_error_code = $2,
-            processing_error_message = $3,
-            processing_retryable = $4,
-            updated_at = NOW()
-        WHERE id = $1
-      `,
-      [sourceId, failure.code, failure.message, failure.retryable],
-    );
+    if (job.rows[0].operation === 'TRANSCRIPT_REFRESH') {
+      await markTranscriptRefreshFailedWithClient(client, sourceId, failure);
+    } else {
+      await client.query(
+        `
+          UPDATE sources
+          SET processing_status = 'FAILED',
+              processing_phase = NULL,
+              processing_error_code = $2,
+              processing_error_message = $3,
+              processing_retryable = $4,
+              updated_at = NOW()
+          WHERE id = $1
+        `,
+        [sourceId, failure.code, failure.message, failure.retryable],
+      );
+    }
 
     return true;
   });
@@ -358,6 +399,7 @@ export async function retrySourceJob(sourceId: number): Promise<SourceRecord | n
       `
         UPDATE ingestion_jobs
         SET status = 'QUEUED',
+            operation = 'INGEST_SOURCE',
             attempt_count = 0,
             retry_count = retry_count + 1,
             available_at = NOW(),
@@ -386,5 +428,86 @@ export async function retrySourceJob(sourceId: number): Promise<SourceRecord | n
     );
 
     return findSourceByIdWithClient(client, sourceId);
+  });
+}
+
+export async function requestTranscriptRefresh(
+  sourceId: number,
+): Promise<{ status: 'QUEUED' | 'PROCESSING' | 'READY' } | null> {
+  return withTransaction(async (client) => {
+    const jobResult = await client.query<{
+      id: number;
+      status: 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+      operation: IngestionOperation;
+    }>(
+      'SELECT id, status, operation FROM ingestion_jobs WHERE source_id = $1 FOR UPDATE',
+      [sourceId],
+    );
+    const source = await findSourceByIdWithClient(client, sourceId);
+
+    if (!source) {
+      return null;
+    }
+
+    if (!jobResult.rows[0]) {
+      throw new Error(`Source ${sourceId} has no ingestion job.`);
+    }
+
+    if (source.status !== SourceStatus.READY) {
+      throw new AppError(
+        'The source must be ready before its transcript can be prepared.',
+        ErrorCode.SOURCE_NOT_READY,
+        409,
+        { sourceId },
+      );
+    }
+
+    const metadata = await getTranscriptMetadataWithClient(client, sourceId);
+    if (metadata?.status === 'READY') return { status: 'READY' };
+
+    const job = jobResult.rows[0];
+    if (job.status === 'PROCESSING' || job.status === 'QUEUED') {
+      if (job.operation === 'TRANSCRIPT_REFRESH') {
+        return { status: job.status };
+      }
+
+      throw new AppError(
+        'This source already has an active processing job. Wait for it to finish before preparing its transcript.',
+        ErrorCode.SOURCE_NOT_READY,
+        409,
+        { sourceId },
+      );
+    }
+
+    if (metadata?.status === 'FAILED' && metadata.failure && !metadata.failure.retryable) {
+      throw new AppError(
+        metadata.failure.message,
+        ErrorCode.TRANSCRIPT_NOT_AVAILABLE,
+        422,
+        { sourceId, retryable: false },
+      );
+    }
+
+    await markTranscriptRefreshQueuedWithClient(client, sourceId);
+    await client.query(
+      `
+        UPDATE ingestion_jobs
+        SET status = 'QUEUED',
+            operation = 'TRANSCRIPT_REFRESH',
+            attempt_count = 0,
+            retry_count = retry_count + CASE WHEN $2 THEN 1 ELSE 0 END,
+            available_at = NOW(),
+            lease_token = NULL,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            phase = NULL,
+            completed_at = NULL,
+            updated_at = NOW()
+        WHERE id = $1
+      `,
+      [job.id, job.operation === 'TRANSCRIPT_REFRESH' && job.status === 'FAILED'],
+    );
+
+    return { status: 'QUEUED' };
   });
 }

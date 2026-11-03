@@ -47,3 +47,54 @@ export function validateSourceIdParam(req: Request): Record<string, string> {
 
   return errors;
 }
+
+export function validateTranscriptQuery(req: Request): Record<string, string> {
+  const errors: Record<string, string> = {};
+  const { cursor, limit, query, around } = req.query;
+
+  if (cursor !== undefined) {
+    if (typeof cursor !== 'string' || !/^\d+$/.test(cursor) || !Number.isSafeInteger(Number(cursor))) {
+      errors.cursor = 'Transcript cursor must be a non-negative integer.';
+    }
+  }
+
+  if (limit !== undefined) {
+    if (typeof limit !== 'string' || !/^\d+$/.test(limit)) {
+      errors.limit = 'Transcript page size must be an integer.';
+    } else {
+      const parsed = Number(limit);
+      if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 200) {
+        errors.limit = 'Transcript page size must be between 1 and 200.';
+      }
+    }
+  }
+
+  if (query !== undefined) {
+    if (typeof query !== 'string') {
+      errors.query = 'Transcript search query must be a string.';
+    } else if (query.trim().length > 200) {
+      errors.query = 'Transcript search query cannot exceed 200 characters.';
+    }
+  }
+
+  if (around !== undefined) {
+    if (typeof around !== 'string' || !/^(?:\d+\.?\d*|\.\d+)$/.test(around) || !Number.isFinite(Number(around))) {
+      errors.around = 'Transcript timestamp must be a non-negative number.';
+    }
+  }
+
+  if (cursor !== undefined && around !== undefined) {
+    errors.cursor = 'A transcript cursor cannot be combined with a timestamp lookup.';
+  }
+  if (query !== undefined && around !== undefined) {
+    errors.query = 'Transcript search cannot be combined with a timestamp lookup.';
+  }
+
+  return errors;
+}
+
+export function validateTranscriptExportQuery(req: Request): Record<string, string> {
+  const format = req.query.format;
+  if (format === 'txt' || format === 'srt' || format === 'vtt') return {};
+  return { format: 'Transcript export format must be txt, srt, or vtt.' };
+}

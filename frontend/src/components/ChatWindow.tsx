@@ -3,6 +3,7 @@ import type { ChatMessage } from '../types/types';
 interface Props {
   messages: ChatMessage[];
   onRetry: (turnId: string) => void;
+  onCitationSelect: (seconds: number) => void;
 }
 
 function formatTimestamp(seconds: number | null): string {
@@ -31,7 +32,7 @@ function providerLabel(providerId: ChatMessage['providerId']): string | null {
   return { gemini: 'Gemini', openai: 'OpenAI', anthropic: 'Claude', ollama: 'Ollama' }[providerId];
 }
 
-export function ChatWindow({ messages, onRetry }: Props) {
+export function ChatWindow({ messages, onRetry, onCitationSelect }: Props) {
   return (
     <div aria-live="polite" aria-relevant="additions text" className="chat-messages">
       {messages.length === 0 && (
@@ -88,22 +89,35 @@ export function ChatWindow({ messages, onRetry }: Props) {
                 <div className="citation-list">
                   <div className="citation-heading">Source moments</div>
                   {message.citations.map((citation, index) => (
-                    <a
-                      className="citation-card"
-                      href={citation.href}
-                      key={`${message.id}-${citation.id}`}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <span className="citation-number">{index + 1}</span>
-                      <span className="citation-content">
-                        <span className="citation-time">
-                          {formatTimestamp(citation.startSeconds)}
-                          <span aria-hidden="true"> ↗</span>
-                        </span>
-                        <span className="citation-excerpt">{citation.excerpt}</span>
-                      </span>
-                    </a>
+                    <div className="citation-item" key={`${message.id}-${citation.id}`}>
+                      {citation.startSeconds !== null ? (
+                        <button
+                          aria-label={`Play cited moment at ${formatTimestamp(citation.startSeconds)}`}
+                          className="citation-card citation-card-button"
+                          onClick={() => onCitationSelect(citation.startSeconds as number)}
+                          type="button"
+                        >
+                          <span className="citation-number">{index + 1}</span>
+                          <span className="citation-content">
+                            <span className="citation-time">{formatTimestamp(citation.startSeconds)}</span>
+                            <span className="citation-excerpt">{citation.excerpt}</span>
+                          </span>
+                        </button>
+                      ) : (
+                        <a className="citation-card" href={citation.href} rel="noreferrer" target="_blank">
+                          <span className="citation-number">{index + 1}</span>
+                          <span className="citation-content">
+                            <span className="citation-time">Open source ↗</span>
+                            <span className="citation-excerpt">{citation.excerpt}</span>
+                          </span>
+                        </a>
+                      )}
+                      {citation.startSeconds !== null && (
+                        <a className="citation-external" href={citation.href} rel="noreferrer" target="_blank">
+                          Open on YouTube ↗
+                        </a>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}

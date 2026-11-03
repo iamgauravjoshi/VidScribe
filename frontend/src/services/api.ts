@@ -5,6 +5,7 @@ import type {
   Conversation,
   LlmProviderId,
   Source,
+  SourceTranscript,
 } from '../types/types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
@@ -87,6 +88,61 @@ export async function getSource(sourceId: number): Promise<Source> {
 export async function getSourceConversation(sourceId: number): Promise<Conversation> {
   const result = await request<{ conversation: Conversation }>(`/sources/${sourceId}/conversation`);
   return result.conversation;
+}
+
+export async function getSourceTranscript(
+  sourceId: number,
+  options: { limit?: number; cursor?: number; query?: string; aroundSeconds?: number; signal?: AbortSignal } = {},
+): Promise<SourceTranscript> {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  if (options.cursor !== undefined) params.set('cursor', String(options.cursor));
+  if (options.query) params.set('query', options.query);
+  if (options.aroundSeconds !== undefined) params.set('around', String(options.aroundSeconds));
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  const result = await request<{ transcript: SourceTranscript }>(
+    `/sources/${sourceId}/transcript${suffix}`,
+    { signal: options.signal },
+  );
+  return result.transcript;
+}
+
+export async function requestSourceTranscriptRefresh(
+  sourceId: number,
+): Promise<{ status: 'QUEUED' | 'PROCESSING' | 'READY' }> {
+  const result = await request<{ transcript: { status: 'QUEUED' | 'PROCESSING' | 'READY' } }>(
+    `/sources/${sourceId}/transcript/rebuild`,
+    { method: 'POST' },
+  );
+  return result.transcript;
+}
+
+export async function downloadSourceTranscript(
+  sourceId: number,
+  format: 'txt' | 'srt' | 'vtt',
+): Promise<Blob> {
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}/sources/${sourceId}/transcript/export?format=${format}`);
+  } catch (error: unknown) {
+    throw new ApiError(
+      error instanceof Error ? error.message : 'The transcript export could not be downloaded.',
+      0,
+      'NETWORK_ERROR',
+    );
+  }
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as ApiErrorBody | null;
+    throw new ApiError(
+      payload?.error?.message ?? `Transcript export failed (${response.status}).`,
+      response.status,
+      payload?.error?.code,
+    );
+  }
+
+  return response.blob();
 }
 
 export async function retrySource(sourceId: number): Promise<Source> {

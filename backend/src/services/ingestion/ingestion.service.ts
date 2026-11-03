@@ -103,7 +103,7 @@ export async function processIngestionJob(job: ClaimedIngestionJob): Promise<voi
     const { transcript } = await getTranscript(job.canonicalUrl);
     heartbeat.assertOwned();
 
-    if (transcript.length === 0 || transcript.every((segment) => !segment.text.trim())) {
+    if (transcript.length === 0) {
       throw new AppError(
         'No usable English captions were found for this video.',
         ErrorCode.TRANSCRIPT_EMPTY,
@@ -146,7 +146,8 @@ export async function processIngestionJob(job: ClaimedIngestionJob): Promise<voi
       throw new ProcessingLeaseLostError();
     }
 
-    await completeIngestionJob(job.id, job.leaseToken, chunksToPersist);
+    const languageCode = transcript.find((segment) => segment.lang)?.lang ?? 'en';
+    await completeIngestionJob(job.id, job.leaseToken, chunksToPersist, transcript, languageCode);
 
     logger.info('Source ingestion completed', {
       jobId: job.id,

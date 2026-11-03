@@ -17,6 +17,19 @@ The backend binds to `127.0.0.1`. Vite serves the local UI and proxies `/api` to
 
 Start with the [project guide](docs/PROJECT.md) for architecture, data flow, reliability boundaries, and local setup. The [UX map](docs/product/library-and-source-workspace.md), [evolution log](docs/architecture/evolution.md), [service guides](docs/services/), [decision records](docs/decisions/), and [interview reference](docs/interview/engineering-concepts.md) explain how and why the current system is designed.
 
+## Automated browser suite
+
+Install the browser once, then run the end-to-end suite from the repository root:
+
+```powershell
+npx playwright install chromium
+npm run test:e2e
+```
+
+Docker Desktop must be running. The runner starts the isolated `vidscribe_test` database when needed, applies migrations, resets source fixtures in that test database, and starts the API and Vite on ports `8218` and `4178`. It never uses port `3000` or the development database. Playwright closes its API/UI processes at the end; the runner stops only the test database container it started and preserves its named volume.
+
+The browser tests use the real API and PostgreSQL transcript search/export endpoints, but skip the ingestion worker and replace the YouTube IFrame API with a deterministic browser stub. They cover citation seeking and player fallback, TXT/SRT/VTT downloads, transcript search and pagination, mobile-width overflow, and legacy refresh states including retryable and non-retryable failures. They do not call YouTube or an AI provider.
+
 ## PostgreSQL integration tests
 
 After creating the repository-root `.env`, start the isolated test database from the repository root:

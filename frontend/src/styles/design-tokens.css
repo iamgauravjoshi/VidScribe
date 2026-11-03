@@ -1,12 +1,6 @@
 :root {
   color-scheme: light;
-  font-family:
-    'Geist',
-    sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI';
+  font-family: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   font-optical-sizing: auto;
   font-synthesis: none;
   font-weight: 400;
@@ -50,7 +44,7 @@
   --focus-ring: rgb(101 84 217 / 45%);
 
   /* Typography scale */
-  --font-sans: 'Geist', sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI';
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --text-xs: 0.6875rem;
   --text-sm: 0.8125rem;
   --text-md: 1rem;

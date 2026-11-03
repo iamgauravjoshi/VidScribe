@@ -587,6 +587,33 @@ The dataset is broader but still a small convenience sample of public educationa
 - [Provider-free evaluation runner](../../backend/scripts/evaluate-real-source-search.ts)
 - [Results and limitations](../evaluations/real-source-search-2026-11-03.md)
 
+## 2026-11-03 — Review citation offsets in the video player
+
+### Previous approach
+
+Dataset v2 reported exact-segment rank and timestamp distance, with manual playback identified as the next review step.
+
+### Problem discovered
+
+Timestamp proximity and exact segment identity do not fully measure whether a citation helps answer a question. A nearby citation can show a related list rather than a requested definition; a slightly earlier citation can be a useful lead-in; and a passage can be visible in the source while candidate retrieval returns no citation at all.
+
+### Player review
+
+Opened all eight dataset-v2 cases with an absent, non-exact, or offset citation in the captioned YouTube player. Confirmed the labeled target against the displayed caption and compared it with the first relevant result's citation. The audit found unrelated large-offset links for the habit-learning and Golden Circle questions, a late HAIL-love link, an answer-omitting candle-task link, two answer-omitting Dan Pink links despite short offsets, and one useful HAIL-authenticity lead-in. The neural-network weight question had a visible target passage but no top-five result.
+
+### Why this is better
+
+The review separates a timestamp that is close from evidence that independently supports the asked fact. It also distinguishes candidate-generation misses from citation-selection mistakes. This makes answer-support review more informative than optimizing median offset alone.
+
+### Trade-offs and deferred work
+
+The review is a small human audit of public educational YouTube talks, not an estimate of production quality. The five-question Gemini answer-support sample remains incomplete: the evaluation process cannot decrypt the saved key, while the user reports a successful answer in the UI that is absent from this process's conversation database. The older development database was backed up and migrated from schema 004 to 006; its original sources, provider row, and messages remain. Capture and score the reported output or reconcile the app/runtime mismatch before tuning ranking, then add held-out questions so the tuning set is not used as final validation. Semantic retrieval and another input adapter remain deferred until that evidence identifies the limiting failure mode.
+
+### References
+
+- [Timestamp and answer-support audit](../evaluations/human-reviewed-citation-answer-2026-11-03.md)
+- [Dataset-v2 retrieval baseline](../evaluations/real-source-search-2026-11-03.md)
+
 ## Change entry template
 
 ```markdown

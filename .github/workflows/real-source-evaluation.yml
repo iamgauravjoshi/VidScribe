@@ -1,0 +1,70 @@
+name: Real-source search evaluation
+
+on:
+  pull_request:
+    types:
+      - labeled
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.label.name == 'evaluate-real-source-search')
+    name: Public-source retrieval and citation baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Start isolated PostgreSQL test database
+        run: docker compose -f docker-compose.test.yml up -d --wait
+
+      - name: Configure disposable test database connection
+        shell: bash
+        run: |
+          port_address="$(docker compose -f docker-compose.test.yml port postgres-test 5432)"
+          postgres_port="$(printf '%s' "$port_address" | sed 's/.*://')"
+          if [[ ! "$postgres_port" =~ ^[0-9]+$ ]]; then
+            echo "Could not determine the PostgreSQL test port from: $port_address" >&2
+            exit 1
+          fi
+
+          {
+            echo "VIDSCRIBE_TEST_DATABASE_URL=postgresql://vidscribe_test:vidscribe_test@127.0.0.1:$postgres_port/vidscribe_test"
+            echo "POSTGRES_HOST=127.0.0.1"
+            echo "POSTGRES_PORT=$postgres_port"
+            echo "POSTGRES_DB=vidscribe_test"
+            echo "POSTGRES_USER=vidscribe_test"
+            echo "POSTGRES_PASSWORD=vidscribe_test"
+          } >> "$GITHUB_ENV"
+
+      - name: Ingest public caption sources and evaluate local search
+        run: npm run eval:real-sources
+        env:
+          NODE_ENV: test
+
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: real-source-search-evaluation
+          path: real-source-evaluation.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Stop isolated PostgreSQL test database
+        if: always()
+        run: docker compose -f docker-compose.test.yml down

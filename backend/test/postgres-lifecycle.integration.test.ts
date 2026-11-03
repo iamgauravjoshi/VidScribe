@@ -60,6 +60,7 @@ test(
 
     let sourceIdForCleanup: number | null = null;
     let unrelatedSourceIdForCleanup: number | null = null;
+    const timestampMigrationSourceIds: number[] = [];
     const originalActiveProvider = await aiSettingsRepository.getActiveProvider();
     const originalOpenAiConfig = await aiSettingsRepository.getStoredProviderConfig('openai');
 
@@ -744,7 +745,172 @@ test(
         '0',
         'deleting a conversation must cascade its messages',
       );
+
+      const createTimestampFixtureSource = async (suffix: string): Promise<number> => {
+        const externalId = 'timestamp-' + suffix + '-' + randomUUID();
+        const result = await pool.query<{ id: number }>(
+          'INSERT INTO sources (source_type, external_id, canonical_url, title, processing_status) ' +
+            "VALUES ('youtube', $1, $2, $3, 'READY') RETURNING id",
+          [externalId, 'https://www.youtube.com/watch?v=' + externalId, 'Timestamp fixture ' + suffix],
+        );
+        const id = result.rows[0]!.id;
+        timestampMigrationSourceIds.push(id);
+        return id;
+      };
+
+      const millisecondSourceId = await createTimestampFixtureSource('milliseconds');
+      await pool.query(
+        "INSERT INTO source_transcripts (source_id, status, language_code, segment_count, fetched_at) " +
+          "VALUES ($1, 'READY', 'en', 3, NOW())",
+        [millisecondSourceId],
+      );
+      await pool.query(
+        'INSERT INTO source_transcript_segments (source_id, segment_index, start_seconds, duration_seconds, text) ' +
+          "VALUES ($1, 0, 1000, 800, 'First millisecond caption'), " +
+          "($1, 1, 2400, 1000, 'Second millisecond caption'), " +
+          "($1, 2, 3800, 1000, 'Third millisecond caption')",
+        [millisecondSourceId],
+      );
+      await pool.query(
+        "INSERT INTO source_chunks (source_id, chunk_index, content, start_seconds, end_seconds, embedding) " +
+          "VALUES ($1, 0, 'Millisecond chunk timestamps', 1000, 5000, NULL)",
+        [millisecondSourceId],
+      );
+      const millisecondConversation = await pool.query<{ id: number }>(
+        'INSERT INTO conversations (source_id) VALUES ($1) RETURNING id',
+        [millisecondSourceId],
+      );
+      const millisecondExternalId = await pool.query<{ external_id: string }>(
+        'SELECT external_id FROM sources WHERE id = $1',
+        [millisecondSourceId],
+      );
+      await pool.query(
+        "INSERT INTO messages (conversation_id, turn_id, role, status, content, citations, finished_at) " +
+          "VALUES ($1, $2, 'ASSISTANT', 'COMPLETED', 'Timestamp migration fixture', $3::JSONB, NOW())",
+        [
+          millisecondConversation.rows[0]!.id,
+          randomUUID(),
+          JSON.stringify([{
+            id: 'timestamp-migration-citation',
+            startSeconds: 1000,
+            endSeconds: 5000,
+            excerpt: 'Millisecond chunk timestamps',
+            href: 'https://www.youtube.com/watch?v=' + millisecondExternalId.rows[0]!.external_id + '&t=1000s',
+          }]),
+        ],
+      );
+
+      const legacyMillisecondSourceId = await createTimestampFixtureSource('legacy-milliseconds');
+      await pool.query(
+        "INSERT INTO source_chunks (source_id, chunk_index, content, start_seconds, end_seconds, embedding) " +
+          "VALUES ($1, 0, 'Legacy millisecond chunk one', 1000, 5000, NULL), " +
+          "($1, 1, 'Legacy millisecond chunk two', 7000, 11000, NULL)",
+        [legacyMillisecondSourceId],
+      );
+
+      const secondsSourceId = await createTimestampFixtureSource('seconds');
+      await pool.query(
+        "INSERT INTO source_transcripts (source_id, status, language_code, segment_count, fetched_at) " +
+          "VALUES ($1, 'READY', 'en', 3, NOW())",
+        [secondsSourceId],
+      );
+      await pool.query(
+        'INSERT INTO source_transcript_segments (source_id, segment_index, start_seconds, duration_seconds, text) ' +
+          "VALUES ($1, 0, 1, 0.8, 'First seconds caption'), " +
+          "($1, 1, 2.4, 1, 'Second seconds caption'), " +
+          "($1, 2, 3.8, 1, 'Third seconds caption')",
+        [secondsSourceId],
+      );
+      await pool.query(
+        "INSERT INTO source_chunks (source_id, chunk_index, content, start_seconds, end_seconds, embedding) " +
+          "VALUES ($1, 0, 'Seconds chunk timestamps', 1, 5, NULL)",
+        [secondsSourceId],
+      );
+
+      const legacySecondsSourceId = await createTimestampFixtureSource('legacy-seconds');
+      await pool.query(
+        "INSERT INTO source_chunks (source_id, chunk_index, content, start_seconds, end_seconds, embedding) " +
+          "VALUES ($1, 0, 'Legacy seconds chunk timestamps', 1, 5, NULL)",
+        [legacySecondsSourceId],
+      );
+
+      await pool.query(
+        "DELETE FROM schema_migrations WHERE version = '006_normalize_youtube_transcript_times'",
+      );
+      await migrations.runMigrations();
+
+      const migratedSegments = await pool.query<{
+        start_seconds: number;
+        duration_seconds: number;
+      }>(
+        'SELECT start_seconds, duration_seconds FROM source_transcript_segments ' +
+          'WHERE source_id = $1 ORDER BY segment_index',
+        [millisecondSourceId],
+      );
+      assert.equal(migratedSegments.rows.length, 3);
+      assert.ok(Math.abs(migratedSegments.rows[0]!.start_seconds - 1) < 0.000001);
+      assert.ok(Math.abs(migratedSegments.rows[0]!.duration_seconds - 0.8) < 0.000001);
+      assert.ok(Math.abs(migratedSegments.rows[2]!.start_seconds - 3.8) < 0.000001);
+
+      const migratedChunk = await pool.query<{ start_seconds: number; end_seconds: number }>(
+        'SELECT start_seconds, end_seconds FROM source_chunks WHERE source_id = $1',
+        [millisecondSourceId],
+      );
+      assert.ok(Math.abs(migratedChunk.rows[0]!.start_seconds - 1) < 0.000001);
+      assert.ok(Math.abs(migratedChunk.rows[0]!.end_seconds - 5) < 0.000001);
+
+      const migratedCitation = await pool.query<{ citations: Array<Record<string, unknown>> }>(
+        'SELECT messages.citations FROM messages ' +
+          'INNER JOIN conversations ON conversations.id = messages.conversation_id ' +
+          'WHERE conversations.source_id = $1',
+        [millisecondSourceId],
+      );
+      const migratedTimestampCitation = migratedCitation.rows[0]!.citations[0]!;
+      assert.equal(migratedTimestampCitation.startSeconds, 1);
+      assert.equal(migratedTimestampCitation.endSeconds, 5);
+      const citationUrl = new URL(String(migratedTimestampCitation.href));
+      assert.equal(citationUrl.searchParams.get('v'), millisecondExternalId.rows[0]!.external_id);
+      assert.equal(citationUrl.searchParams.get('t'), '1s');
+
+      const migratedLegacyChunk = await pool.query<{ start_seconds: number; end_seconds: number }>(
+        'SELECT start_seconds, end_seconds FROM source_chunks ' +
+          'WHERE source_id = $1 AND chunk_index = 1',
+        [legacyMillisecondSourceId],
+      );
+      assert.ok(Math.abs(migratedLegacyChunk.rows[0]!.start_seconds - 7) < 0.000001);
+      assert.ok(Math.abs(migratedLegacyChunk.rows[0]!.end_seconds - 11) < 0.000001);
+
+      const unchangedSeconds = await pool.query<{
+        segment_start: number;
+        segment_duration: number;
+        chunk_start: number;
+        chunk_end: number;
+      }>(
+        'SELECT segment.start_seconds AS segment_start, ' +
+          'segment.duration_seconds AS segment_duration, chunk.start_seconds AS chunk_start, ' +
+          'chunk.end_seconds AS chunk_end FROM source_transcript_segments AS segment ' +
+          'INNER JOIN source_chunks AS chunk USING (source_id) ' +
+          'WHERE segment.source_id = $1 AND segment.segment_index = 0',
+        [secondsSourceId],
+      );
+      assert.deepEqual(unchangedSeconds.rows[0], {
+        segment_start: 1,
+        segment_duration: 0.8,
+        chunk_start: 1,
+        chunk_end: 5,
+      });
+      const unchangedLegacyChunk = await pool.query<{
+        start_seconds: number;
+        end_seconds: number;
+      }>(
+        'SELECT start_seconds, end_seconds FROM source_chunks WHERE source_id = $1',
+        [legacySecondsSourceId],
+      );
+      assert.deepEqual(unchangedLegacyChunk.rows[0], { start_seconds: 1, end_seconds: 5 });
     } finally {
+      for (const migrationSourceId of timestampMigrationSourceIds) {
+        await sources.deleteSource(migrationSourceId);
+      }
       if (sourceIdForCleanup !== null) {
         await sources.deleteSource(sourceIdForCleanup);
       }

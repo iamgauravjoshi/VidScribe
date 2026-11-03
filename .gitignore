@@ -125,6 +125,7 @@ env/
 /playwright-report/
 /test-results/
 /blob-report/
+/real-source-evaluation.json
 
 # Unstructured local learning notes; keep useful project docs under docs/
 /New Text Document.txt

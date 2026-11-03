@@ -470,7 +470,7 @@ A developer could merge a change that compiled but broke PostgreSQL publication/
 - Upload Playwright screenshots, traces, and its HTML report for 14 days when the job fails. Stop the test database with an unconditional cleanup step.
 - Pin GitHub actions to full commit SHAs and grant the workflow read-only repository permissions.
 
-The first hosted run failed during the backend build: the backend used TypeScript 7's platform-specific native compiler, but the lockfile created on Windows contained the Windows binary and omitted the Linux binary used by GitHub's Ubuntu runner. No database or Playwright checks ran on that attempt. The backend has no TypeScript 7-specific language requirement, so its compiler was aligned to TypeScript 6.0.3, already used by the frontend; the platform-specific package entries were removed from the lockfile. A clean local `npm ci`, root build, frontend lint, and backend tests passed after this fix. The hosted rerun remains the reliability check.
+The first hosted run failed during the backend build: the backend used TypeScript 7's platform-specific native compiler, but the lockfile created on Windows contained the Windows binary and omitted the Linux binary used by GitHub's Ubuntu runner. No database or Playwright checks ran on that attempt. The backend has no TypeScript 7-specific language requirement, so its compiler was aligned to TypeScript 6.0.3, already used by the frontend; the platform-specific package entries were removed from the lockfile. A clean local `npm ci`, root build, frontend lint, and backend tests passed after this fix. Hosted run 41594485760 passed build, lint, 14/14 backend and PostgreSQL tests, and 5/5 Chromium tests. This phase adds timestamp correction coverage and requires a fresh run before completion.
 
 ### Why this is better
 
@@ -486,6 +486,38 @@ Hosted browser/database runs take longer and cost more runner time than build-on
 - [Workflow](../../.github/workflows/ci.yml)
 - [Isolated PostgreSQL target](../../docker-compose.test.yml)
 - [Browser-suite decision](../decisions/automated-browser-suite.md)
+
+## 2026-11-03 — Timestamp units, CI reliability, and real-source evaluation
+
+### Previous approach
+
+The YouTube adapter copied transcript offsets and durations directly into the domain's seconds-based time fields. Pull request CI had passed once, but it did not yet exercise the newly discovered timestamp defect or its migration repair. Search quality evidence used a small synthetic PostgreSQL corpus only.
+
+### Problem discovered
+
+A real caption response returned srv3 values in milliseconds, while another supported upstream caption format returns seconds. The mismatch propagated through chunks, persisted transcript segments, player seeks, and saved citation times. The product also needed a controlled real-transcript retrieval measurement after the provider-free CI gate was shown to work.
+
+### New approach
+
+- Normalize timestamp units in the YouTube adapter using the median positive segment duration, before chunking or persistence.
+- Add migration 006 to repair clearly millisecond-valued canonical transcript rows, derived chunk bounds, and saved citation timestamps/links. Use a higher threshold for legacy chunk-only sources with no canonical segments, and leave seconds-valued rows unchanged.
+- Add unit and PostgreSQL integration scenarios for both upstream formats, legacy rows, historical citations, and unaffected seconds values.
+- Add a manual/label-triggered, provider-free GitHub workflow that ingests three public captioned YouTube sources into an isolated test database and reports six labeled search/citation cases. It writes an artifact without adding live captions or model calls to required pull request CI.
+
+### Why this is better
+
+All parts of VidScribe now share the same seconds contract, including historical answers. The workflow keeps the standard pull request gate deterministic and secret-free. Hosted run [41608534092](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41608534092) passed build, lint, PostgreSQL migration coverage, and all five browser tests. The separate real-source evaluation did not produce quality evidence: run [41608747780](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41608747780) could not fetch captions for any of its three videos on GitHub-hosted runners. Docker Desktop was unavailable for a local database-backed rerun.
+
+### Trade-offs and deferred work
+
+The adapter infers units because the dependency does not expose format metadata. The legacy chunk-only migration heuristic is weaker than segment-duration detection and uses a conservative threshold. The six-query real-source sample is too small to establish answer truthfulness or justify a broad search redesign, and it remains unmeasured until run from a caption-accessible environment. The synthetic retrieval fixture's 0.75 Recall@3 and known paraphrase miss provide a provisional reason to improve local lexical retrieval/citation ranking before adding another input type; confirm that priority with real-transcript measurements.
+
+### References
+
+- YouTube timestamp normalization decision: ../decisions/youtube-transcript-timestamp-normalization.md
+- Real-source evaluation runner: ../../backend/scripts/evaluate-real-source-search.ts
+- Migration 006: ../../backend/migrations/006_normalize_youtube_transcript_times.sql
+- Pull request validation decision: ../decisions/ci-validation-workflow.md
 
 ## Change entry template
 

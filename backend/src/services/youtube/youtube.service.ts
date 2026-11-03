@@ -28,19 +28,36 @@ interface YouTubeTranscriptResponse {
 }
 
 export function normalizeTranscript(transcript: YouTubeTranscriptResponse[]): TranscriptSegment[] {
-  return transcript
-    .filter((item) =>
-      typeof item.text === 'string'
-      && item.text.trim().length > 0
-      && Number.isFinite(item.offset)
-      && item.offset >= 0
-      && Number.isFinite(item.duration)
-      && item.duration >= 0,
-    )
+  const validItems = transcript.filter(
+    (item) =>
+      typeof item.text === 'string' &&
+      item.text.trim().length > 0 &&
+      Number.isFinite(item.offset) &&
+      item.offset >= 0 &&
+      Number.isFinite(item.duration) &&
+      item.duration >= 0,
+  );
+
+  // youtube-transcript can return raw milliseconds for its srv3 caption
+  // format, but seconds for the classic format. Infer the unit from segment
+  // durations rather than offsets: long videos can legitimately have large
+  // offsets while their individual caption durations remain short.
+  const durations = validItems
+    .map((item) => item.duration)
+    .filter((duration) => duration > 0)
+    .sort((left, right) => left - right);
+  const middleDuration = Math.floor(durations.length / 2);
+  const medianDuration =
+    durations.length % 2 === 0 && durations.length > 0
+      ? (durations[middleDuration - 1]! + durations[middleDuration]!) / 2
+      : (durations[middleDuration] ?? 0);
+  const unitScale = medianDuration > 60 ? 1000 : 1;
+
+  return validItems
     .map((item) => ({
       text: item.text.trim(),
-      start: item.offset,
-      duration: item.duration,
+      start: item.offset / unitScale,
+      duration: item.duration / unitScale,
       lang: item.lang,
     }))
     .sort((left, right) => left.start - right.start);

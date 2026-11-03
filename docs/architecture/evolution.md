@@ -506,11 +506,11 @@ A real caption response returned srv3 values in milliseconds, while another supp
 
 ### Why this is better
 
-All parts of VidScribe now share the same seconds contract, including historical answers. The workflow keeps the standard pull request gate deterministic and secret-free. Hosted run [41608534092](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41608534092) passed build, lint, PostgreSQL migration coverage, and all five browser tests. The separate real-source evaluation did not produce quality evidence: run [41608747780](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41608747780) could not fetch captions for any of its three videos on GitHub-hosted runners. Docker Desktop was unavailable for a local database-backed rerun.
+All parts of VidScribe now share the same seconds contract, including historical answers. Hosted run [41609369491](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41609369491) passed build, lint, PostgreSQL integration, and all five browser tests. Although GitHub-hosted run [41608747780](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41608747780) could not fetch captions, the isolated local evaluation completed on all three sources. It measured `Recall@5 = 1.00`, `MRR = 0.547`, a median absolute anchor-to-chunk-start distance of 58.44 seconds, and a valid citation URL rate of 1.00 for the six labeled queries.
 
 ### Trade-offs and deferred work
 
-The adapter infers units because the dependency does not expose format metadata. The legacy chunk-only migration heuristic is weaker than segment-duration detection and uses a conservative threshold. The six-query real-source sample is too small to establish answer truthfulness or justify a broad search redesign, and it remains unmeasured until run from a caption-accessible environment. The synthetic retrieval fixture's 0.75 Recall@3 and known paraphrase miss provide a provisional reason to improve local lexical retrieval/citation ranking before adding another input type; confirm that priority with real-transcript measurements.
+The adapter infers units because the dependency does not expose format metadata. The legacy chunk-only migration heuristic is weaker than segment-duration detection and uses a conservative threshold. The six-query real-source sample is too small to establish answer truthfulness or justify a broad search redesign. It shows all labeled passages in the top five, but ranking and citation timestamp precision are the clearest opportunities in this sample. Improve those and expand the labeled set before deciding whether a second input type or semantic retrieval has higher value.
 
 ### References
 
@@ -518,6 +518,7 @@ The adapter infers units because the dependency does not expose format metadata.
 - Real-source evaluation runner: ../../backend/scripts/evaluate-real-source-search.ts
 - Migration 006: ../../backend/migrations/006_normalize_youtube_transcript_times.sql
 - Pull request validation decision: ../decisions/ci-validation-workflow.md
+- Real-source retrieval evaluation: ../evaluations/real-source-search-2026-11-03.md
 
 ## Change entry template
 

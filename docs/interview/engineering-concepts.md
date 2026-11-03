@@ -176,3 +176,15 @@ The Playwright runner applies migrations to the repository's dedicated `vidscrib
 - *Why not make every transcript segment the RAG context?* A single caption can lose explanatory context. The chunk remains the generation context; a segment is the more precise evidence pointer.
 - *Can the reranker find evidence missing from the top five?* No. It intentionally retains the prior candidate boundary. A larger evaluation should show candidate-generation misses before we expand that work.
 - *Why no vector search?* The current data boundary keeps transcripts local, and the six-query sample does not establish that semantic retrieval is needed. A vector path would need an explicit transcript-transfer/runtime choice, index versioning, and broader evaluation.
+
+## How do you evaluate whether a citation points to the evidence?
+
+**Short answer:** Use a human-labeled transcript segment for each question, then report chunk recall separately from whether a returned citation selects that exact segment.
+
+**Deep answer:** The evaluation manifest stores a source, question, query style, and short exact anchor phrase. The runner resolves that phrase to a canonical transcript segment, requiring an explicit occurrence when it repeats. A chunk counts as relevant if its time range covers the target. Exact citation support is measured separately by comparing the selected citation's segment index to the target. The report also includes citation-start distance median, p90, and maximum so outliers are visible. The run uses isolated PostgreSQL and makes no model call.
+
+**Failure and limitations:** The phrase is a manually chosen evidence label, and exact segment equality is strict. A neighboring caption may still support an answer. Retrieval/citation metrics cannot prove that generated prose is factual or that a human finds the seek point useful. The current 18-query set covers six public educational YouTube videos, not a representative product corpus.
+
+**Example:** The expanded run found a target chunk in 17/18 questions by rank five, but an exact target-segment citation appeared by rank five in 11/18. This distinction exposes citation-selection problems that chunk recall alone hides. Definition-style cases were weakest in this small sample, so they are candidates for playback and answer review.
+
+**Follow-up:** Provider-free CI still tests SQL and API/browser contracts. The opt-in real-source evaluation provides caption-level diagnostics. A separate, small human-reviewed provider sample is needed before claiming answer-to-citation support. See the [evaluation decision](../decisions/human-labeled-evidence-evaluation.md).

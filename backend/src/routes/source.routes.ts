@@ -6,17 +6,38 @@ import {
   deleteSource,
   listSources,
   readSourceConversation,
+  readSourceTranscript,
   readSource,
+  rebuildSourceTranscript,
+  exportSourceTranscript,
   retrySourceProcessing,
 } from '../controllers/source.controller.js';
 import { validate } from '../middleware/validation.middleware.js';
 import { validateChatRequest } from '../validators/chat.validator.js';
-import { validateCreateSourceRequest, validateSourceIdParam } from '../validators/source.validator.js';
+import {
+  validateCreateSourceRequest,
+  validateSourceIdParam,
+  validateTranscriptExportQuery,
+  validateTranscriptQuery,
+} from '../validators/source.validator.js';
 
 export const sourceRoutes = Router();
 
 sourceRoutes.post('/', validate(validateCreateSourceRequest), createSource);
 sourceRoutes.get('/', listSources);
+sourceRoutes.get(
+  '/:sourceId/transcript/export',
+  validate(validateSourceIdParam),
+  validate(validateTranscriptExportQuery),
+  exportSourceTranscript,
+);
+sourceRoutes.get(
+  '/:sourceId/transcript',
+  validate(validateSourceIdParam),
+  validate(validateTranscriptQuery),
+  readSourceTranscript,
+);
+sourceRoutes.post('/:sourceId/transcript/rebuild', validate(validateSourceIdParam), rebuildSourceTranscript);
 sourceRoutes.get('/:sourceId', validate(validateSourceIdParam), readSource);
 sourceRoutes.get('/:sourceId/conversation', validate(validateSourceIdParam), readSourceConversation);
 sourceRoutes.post('/:sourceId/retry', validate(validateSourceIdParam), retrySourceProcessing);

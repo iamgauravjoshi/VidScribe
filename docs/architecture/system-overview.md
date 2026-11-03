@@ -11,15 +11,16 @@ This document describes the system that is implemented today. Product goals and 
 | Request context middleware      | Assigns a server-side request UUID, returns `X-Request-Id`, and logs route/status/total duration without request bodies or query strings.                                                                                           |
 | AI settings service/repository  | Tests provider credentials/models, stores the selected answer provider/model and encrypted credentials, and returns only safe status/configuration fields to the UI.                                                                |
 | Source service/repository       | Canonicalizes YouTube identity, creates or returns the source/job atomically, and reads or mutates library state.                                                                                                                   |
+| Transcript service/repository   | Validates source readiness, returns paginated/searchable normalized transcript segments, creates TXT/SRT/VTT downloads, and coordinates explicit refresh requests.                                                                      |
 | Conversation service/repository | Persists one conversation per source, claims idempotent answer turns, tracks pending/failure state, and stores answer citations using fenced writes.                                                                                |
 | PostgreSQL worker loop          | Claims queued or expired jobs with row locking, tracks phases and lease ownership, and triggers ingestion. It runs in each backend process.                                                                                         |
 | YouTube adapter                 | Parses supported YouTube URLs and fetches English transcript segments.                                                                                                                                                              |
-| Ingestion service               | Coordinates caption retrieval, chunking, lease checks, and atomic local full-text index publication.                                                                                                                                |
+| Ingestion service               | Coordinates caption retrieval, canonical segment persistence, chunking, lease checks, and atomic transcript/index publication. Supports a refresh operation that preserves a legacy source's ready state.                              |
 | Full-text retrieval repository  | Uses a PostgreSQL GIN expression index and source-scoped rank query to find transcript passages locally.                                                                                                                            |
 | LLM provider registry/adapters  | Dispatches answer generation to the selected Gemini, OpenAI, Anthropic Claude, or Ollama adapter. Cloud keys are decrypted only in the backend process immediately before a request.                                                |
 | Local secret store              | Creates/loads the per-user AES-256-GCM key outside the repository and encrypts cloud credentials before database persistence.                                                                                                       |
 | Citation service                | Maps matched transcript chunks to source/timestamp citations.                                                                                                                                                                       |
-| PostgreSQL                      | Durable source/job state, transcript chunks, GIN full-text index, conversations, messages, and migration history. The legacy pgvector column/extension remain to preserve old stored data, but current retrieval does not use them. |
+| PostgreSQL                      | Durable source/job state, canonical transcript segments, derived chunks, GIN full-text indexes, conversations, messages, and migration history. The legacy pgvector column/extension remain to preserve old stored data, but current retrieval does not use them. |
 
 ## Data flow
 
@@ -42,9 +43,14 @@ sequenceDiagram
   Worker->>DB: Claim with SKIP LOCKED + lease token
   Worker->>YT: Fetch English transcript
   Worker->>DB: Persist phase updates
-  Worker->>DB: Replace chunks + maintain GIN index + mark READY atomically
+  Worker->>DB: Replace transcript segments + chunks + maintain both GIN indexes
+  Worker->>DB: Mark source/job READY atomically
   API-->>UI: READY state
 ```
+
+Transcript browsing uses `GET /sources/:id/transcript` for bounded timestamped segments, optional local full-text search, and context around a cited timestamp. TXT/SRT/VTT downloads are formatted by the API from the canonical segments. The YouTube player is loaded after the user requests playback or selects a citation; citation navigation then calls the IFrame Player API's seek operation. If the embed fails, transcript reading, export, Q&A, and external timestamp links remain available.
+
+Legacy sources have a refresh path: the user explicitly requests missing transcript data, and the worker runs the existing job as `TRANSCRIPT_REFRESH`. The source remains ready and its prior chunks remain queryable during retrieval. A single final transaction replaces segments and chunks. Refresh failure changes only transcript status.
 
 Question submission remains synchronous through RAG, but its state is durable. The API commits a user message and pending assistant message under a per-source conversation lock, then runs local PostgreSQL retrieval and chat inference outside a database transaction. A fenced completion transaction stores the answer and citations. The UI restores messages from `GET /conversation`, polls pending answers, and can safely resubmit an expired turn with the same UUID.
 
@@ -90,7 +96,9 @@ sequenceDiagram
 - A source is created with its job in one transaction. A successful source insert cannot commit without its queued job.
 - Only a job with an eligible queue status and expired/unset availability is claimable. `FOR UPDATE SKIP LOCKED` makes concurrent workers take different jobs.
 - Each claim receives a random lease token. Heartbeats renew expiry. Completion/failure writes require the current token and processing state.
-- The source is `READY` only when all new chunk rows, their GIN index entries, and the completed job commit together.
+- A newly ingested source is `READY` only when transcript segments, transcript metadata, all derived chunk rows, both GIN indexes, and the completed job commit together.
+- A legacy transcript refresh is separate from the source lifecycle: the source stays `READY` and current chunks stay queryable until a refresh publication commits; refresh failure leaves them intact.
+- An ingestion job records `INGEST_SOURCE` or `TRANSCRIPT_REFRESH`. A refresh request locks the job before the source, matching the lock order used by deletion and source retry.
 - A retry reuses the same source and job rows. It resets the current attempt counter, increments retry count, and clears stale failure/lease data.
 - Deletion locks the job before deleting the source, matching the lock order used by claim, retry, and completion.
 - Each source has one conversation. `turn_id` is unique per message role; a transaction locks the conversation while deciding whether the request is new, in progress, completed, or retryable.
@@ -99,7 +107,7 @@ sequenceDiagram
 
 ## Runtime and external dependencies
 
-The backend process starts the HTTP server on loopback and one polling worker loop. The API does not enable broad CORS; the browser uses the Vite same-origin proxy in development. PostgreSQL is required for every lifecycle operation. YouTube captions are needed for ingestion. Ollama is optional and used only when selected for answer generation. Gemini/OpenAI/Claude answers need a configured API key; cloud providers are not health-probed to avoid making billable calls. A polling error is logged and retried on the next worker interval. Migrations run as an explicit command rather than silently changing a database on server startup.
+The backend process starts the HTTP server on loopback and one polling worker loop. The API does not enable broad CORS; the browser uses the Vite same-origin proxy in development. PostgreSQL is required for every lifecycle operation. YouTube captions are needed for ingestion. The embedded YouTube IFrame Player API contacts YouTube only after a user requests playback or jumps to a citation. Ollama is optional and used only when selected for answer generation. Gemini/OpenAI/Claude answers need a configured API key; cloud providers are not health-probed to avoid making billable calls. A polling error is logged and retried on the next worker interval. Migrations run as an explicit command rather than silently changing a database on server startup.
 
 Vite proxies `/api` during development. Production serving/reverse proxying is not yet packaged. Docker Compose starts PostgreSQL with pgvector only. RabbitMQ, a separate worker deployment, user identity, and multi-tenant isolation are deferred until there is a measured product need.
 
@@ -111,6 +119,8 @@ Vite proxies `/api` during development. Production serving/reverse proxying is n
 - YouTube transcript failure: source and job move to `FAILED`; safe error fields are shown to the user. Retry is offered only when marked retryable.
 - Failure before final transaction: no new chunks are visible.
 - Failure in the final transaction: chunk replacement and `READY` roll back together.
+- Transcript refresh failure: the source stays `READY`; prior chunks and conversations remain usable, while the transcript panel exposes the safe refresh failure and a retry action only when eligible.
+- Transcript search/export failure: the transcript remains saved; the UI keeps loaded segments and reports the failed action without altering source processing state.
 - Source deletion racing a worker: job-row lock ordering and the lease-token check prevent deleted or stale work from publishing.
 - Lost commit acknowledgement: a second failure update is fenced by job status/token; if the final commit succeeded, it cannot turn the completed source back into failed.
 - Question request lost after commit: the client repeats the same UUID; the repository returns the current pending/completed turn instead of creating another pair.

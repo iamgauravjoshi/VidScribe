@@ -189,15 +189,12 @@ test(
             startSeconds: 0,
             endSeconds: 1,
           },
-          {
-            sourceId,
-            chunkIndex: 0,
-            content: 'duplicate chunk index should fail',
-            embedding: null,
-            startSeconds: 1,
-            endSeconds: 2,
-          },
-        ]),
+        ], [{
+          text: 'invalid transcript timestamp should fail after chunk and metadata writes',
+          start: -1,
+          duration: 1,
+          lang: 'en',
+        }], 'en'),
       );
 
       const preservedChunk = await pool.query<{ content: string }>(
@@ -211,6 +208,16 @@ test(
         ['previous committed index'],
       );
       assert.equal(preservedSource?.status, 'PROCESSING');
+      const rolledBackTranscript = await pool.query<{ count: string }>(
+        'SELECT COUNT(*)::TEXT AS count FROM source_transcripts WHERE source_id = $1',
+        [sourceId],
+      );
+      assert.equal(rolledBackTranscript.rows[0]?.count, '0');
+      const rolledBackSegments = await pool.query<{ count: string }>(
+        'SELECT COUNT(*)::TEXT AS count FROM source_transcript_segments WHERE source_id = $1',
+        [sourceId],
+      );
+      assert.equal(rolledBackSegments.rows[0]?.count, '0');
 
       await jobs.completeIngestionJob(recoveredLease.id, recoveredLease.leaseToken, [
         {
@@ -245,6 +252,55 @@ test(
           startSeconds: 90,
           endSeconds: 105,
         },
+      ], [
+        {
+          text: 'PostgreSQL stores the English full-text index locally and ranks matching transcript passages with ts_rank_cd.',
+          start: 12,
+          duration: 12,
+          lang: 'en',
+        },
+        {
+          text: 'Answers cite transcript excerpts with YouTube timestamps so readers can open the video at the supporting moment.',
+          start: 30,
+          duration: 15,
+          lang: 'en',
+        },
+        {
+          text: "A cloud answer provider receives only the user's question and matched excerpts; the complete transcript stays in local PostgreSQL.",
+          start: 60,
+          duration: 14,
+          lang: 'en',
+        },
+        {
+          text: 'PostgreSQL source-scoped retrieval uses a GIN index and English text search; lexical matching may miss synonyms and paraphrases.',
+          start: 90,
+          duration: 15,
+          lang: 'en',
+        },
+      ], 'en');
+
+      const initialTranscript = await pool.query<{
+        status: string;
+        segment_count: number;
+        language_code: string;
+      }>(
+        'SELECT status, segment_count, language_code FROM source_transcripts WHERE source_id = $1',
+        [sourceId],
+      );
+      assert.deepEqual(initialTranscript.rows[0], {
+        status: 'READY',
+        segment_count: 4,
+        language_code: 'en',
+      });
+      const initialSegments = await pool.query<{ segment_index: number; text: string }>(
+        'SELECT segment_index, text FROM source_transcript_segments WHERE source_id = $1 ORDER BY segment_index',
+        [sourceId],
+      );
+      assert.deepEqual(initialSegments.rows, [
+        { segment_index: 0, text: 'PostgreSQL stores the English full-text index locally and ranks matching transcript passages with ts_rank_cd.' },
+        { segment_index: 1, text: 'Answers cite transcript excerpts with YouTube timestamps so readers can open the video at the supporting moment.' },
+        { segment_index: 2, text: "A cloud answer provider receives only the user's question and matched excerpts; the complete transcript stays in local PostgreSQL." },
+        { segment_index: 3, text: 'PostgreSQL source-scoped retrieval uses a GIN index and English text search; lexical matching may miss synonyms and paraphrases.' },
       ]);
 
       const indexedWithoutVectors = await pool.query<{
@@ -304,6 +360,125 @@ test(
         recallAtK >= RETRIEVAL_EVALUATION.minimumRecallAtK,
         `Retrieval recall@${RETRIEVAL_EVALUATION.topK} was ${recallAtK.toFixed(2)}; expected at least ${RETRIEVAL_EVALUATION.minimumRecallAtK}.`,
       );
+
+      // Model a legacy source upgraded from before migration 005: it has the
+      // completed retrieval chunks but no canonical transcript row.
+      await pool.query('DELETE FROM source_transcripts WHERE source_id = $1', [sourceId]);
+
+      // Preparing that legacy transcript uses the existing job row while
+      // keeping the already-ready source and its old evidence usable.
+      assert.deepEqual(await jobs.requestTranscriptRefresh(sourceId), { status: 'QUEUED' });
+      const refreshLease = await jobs.claimNextIngestionJob('transcript-refresh-worker-a', 90_000);
+      assert.ok(refreshLease);
+      assert.equal(refreshLease.operation, 'TRANSCRIPT_REFRESH');
+      assert.equal((await sources.findSourceById(sourceId))?.status, 'READY');
+      const oldChunksDuringRefresh = await pool.query<{ content: string }>(
+        'SELECT content FROM source_chunks WHERE source_id = $1 ORDER BY chunk_index',
+        [sourceId],
+      );
+      assert.equal(oldChunksDuringRefresh.rows.length, 4);
+
+      assert.equal(
+        await jobs.failIngestionJob(refreshLease.id, refreshLease.leaseToken, {
+          code: 'TEST_REFRESH_UNAVAILABLE',
+          message: 'Caption provider is temporarily unavailable.',
+          retryable: true,
+        }),
+        true,
+      );
+      assert.equal((await sources.findSourceById(sourceId))?.status, 'READY');
+      const failedRefreshMetadata = await pool.query<{
+        status: string;
+        failure_code: string;
+        failure_retryable: boolean;
+        segment_count: number;
+      }>(
+        'SELECT status, failure_code, failure_retryable, segment_count FROM source_transcripts WHERE source_id = $1',
+        [sourceId],
+      );
+      assert.deepEqual(failedRefreshMetadata.rows[0], {
+        status: 'FAILED',
+        failure_code: 'TEST_REFRESH_UNAVAILABLE',
+        failure_retryable: true,
+        segment_count: 0,
+      });
+      assert.equal(
+        (await pool.query('SELECT COUNT(*) FROM source_transcript_segments WHERE source_id = $1', [sourceId])).rows[0]?.count,
+        0,
+        'a failed legacy refresh does not fabricate transcript segments',
+      );
+      const oldChunksAfterFailure = await pool.query<{ content: string }>(
+        'SELECT content FROM source_chunks WHERE source_id = $1 ORDER BY chunk_index',
+        [sourceId],
+      );
+      assert.equal(oldChunksAfterFailure.rows.length, 4, 'a failed refresh preserves the existing Q&A index');
+
+      // Concurrent retry requests serialize on the job row. Only the first
+      // request resets the failed job and increments retry_count.
+      const priorRetryCount = (await pool.query<{ retry_count: number }>(
+        'SELECT retry_count FROM ingestion_jobs WHERE source_id = $1',
+        [sourceId],
+      )).rows[0]?.retry_count;
+      assert.ok(priorRetryCount !== undefined);
+      const concurrentRefreshRetries = await Promise.all([
+        jobs.requestTranscriptRefresh(sourceId),
+        jobs.requestTranscriptRefresh(sourceId),
+      ]);
+      assert.deepEqual(concurrentRefreshRetries, [{ status: 'QUEUED' }, { status: 'QUEUED' }]);
+      const queuedRefresh = await pool.query<{
+        operation: string;
+        status: string;
+        retry_count: number;
+        attempt_count: number;
+      }>(
+        'SELECT operation, status, retry_count, attempt_count FROM ingestion_jobs WHERE source_id = $1',
+        [sourceId],
+      );
+      assert.deepEqual(queuedRefresh.rows[0], {
+        operation: 'TRANSCRIPT_REFRESH',
+        status: 'QUEUED',
+        retry_count: priorRetryCount + 1,
+        attempt_count: 0,
+      });
+
+      const retriedRefreshLease = await jobs.claimNextIngestionJob('transcript-refresh-worker-b', 90_000);
+      assert.ok(retriedRefreshLease);
+      assert.equal(retriedRefreshLease.operation, 'TRANSCRIPT_REFRESH');
+      assert.equal(retriedRefreshLease.attemptCount, 1);
+      await jobs.completeIngestionJob(retriedRefreshLease.id, retriedRefreshLease.leaseToken, [
+        {
+          sourceId,
+          chunkIndex: 0,
+          content: 'replacement transcript describes a resilient local evidence workspace',
+          startSeconds: 120,
+          endSeconds: 136,
+        },
+      ], [
+        { text: 'The refreshed transcript preserves source timestamps.', start: 120, duration: 8, lang: 'en' },
+        { text: 'The workspace searches evidence locally and seeks to cited moments.', start: 128, duration: 8, lang: 'en' },
+      ], 'en');
+
+      assert.equal((await sources.findSourceById(sourceId))?.status, 'READY');
+      const refreshedTranscript = await pool.query<{ status: string; segment_count: number }>(
+        'SELECT status, segment_count FROM source_transcripts WHERE source_id = $1',
+        [sourceId],
+      );
+      assert.deepEqual(refreshedTranscript.rows[0], { status: 'READY', segment_count: 2 });
+      const refreshedSegments = await pool.query<{ segment_index: number; start_seconds: number; text: string }>(
+        'SELECT segment_index, start_seconds, text FROM source_transcript_segments WHERE source_id = $1 ORDER BY segment_index',
+        [sourceId],
+      );
+      assert.deepEqual(refreshedSegments.rows, [
+        { segment_index: 0, start_seconds: 120, text: 'The refreshed transcript preserves source timestamps.' },
+        { segment_index: 1, start_seconds: 128, text: 'The workspace searches evidence locally and seeks to cited moments.' },
+      ]);
+      const refreshedChunks = await pool.query<{ content: string }>(
+        'SELECT content FROM source_chunks WHERE source_id = $1 ORDER BY chunk_index',
+        [sourceId],
+      );
+      assert.deepEqual(refreshedChunks.rows, [
+        { content: 'replacement transcript describes a resilient local evidence workspace' },
+      ]);
 
       const unrelatedExternalId = `unrelated-${randomUUID()}`;
       const unrelatedSource = await transaction.withTransaction((client) =>

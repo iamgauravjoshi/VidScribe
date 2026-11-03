@@ -338,6 +338,120 @@ The request ID exists only in logs and the response header; there is no tracing 
 
 The user has verified provider-backed answer generation, but no exact provider/model latency or token usage was captured. The current phase adds per-request stage timings and a synthetic PostgreSQL retrieval baseline. Next, record a small set of representative real-source question timings and provider usage (which may incur provider charges), then decide whether latency, capacity, or historical usage is the next product need. Do not infer cost from token counts without a versioned pricing policy.
 
+## 2026-11-03 — Canonical transcript and source evidence workspace
+
+### Previous approach
+
+Ingestion fetched caption segments, converted them to overlapping search chunks, and stored only the chunks. The source workspace showed an external video link beside persistent Q&A; citations opened YouTube in another tab. Older ready sources had no original segment data.
+
+### Problem discovered
+
+Retrieval chunks are optimized for context recall and intentionally overlap. Reusing them as a reader transcript or SRT/VTT export would duplicate text and lose original segment boundaries. Re-ingesting every old source during schema migration would cause unrequested external traffic and make migration duration depend on caption availability.
+
+### New approach
+
+- Add `source_transcripts` and `source_transcript_segments` in migration 005, including local English full-text and timestamp indexes.
+- Persist normalized segments and derived chunks in the same fenced publication transaction.
+- Add a typed transcript API for bounded paging, local search, timestamp context lookup, and TXT/SRT/VTT export.
+- Add a separate `TRANSCRIPT_REFRESH` operation for a user-requested legacy transcript rebuild. Existing Q&A continues against the old index while it runs; success replaces segments/chunks atomically and failure preserves the old ready source.
+- Replace the ready-source preview card with a user-initiated YouTube IFrame player, transcript reader, timestamp selection, and responsive Q&A panel. Citation cards seek the player and retain external YouTube links.
+- Update service, project, UX, decision, and interview documentation.
+
+### Why this is better
+
+Transcript segments are canonical source data; overlapping chunks remain derived search data. The database transaction keeps both representations consistent. Legacy sources are not fabricated or silently fetched, and a refresh error cannot take a previously usable source offline.
+
+### Trade-offs and deferred work
+
+The local database and bundle now include transcript reading/search and a YouTube player API. The player is loaded only after user action because it contacts YouTube. Transcript search uses English PostgreSQL FTS. Export formatting reads the complete saved transcript in memory; streaming exports and transcript version history are deferred until measurement or user needs justify them.
+
+### Verification
+
+Backend TypeScript and frontend production builds passed. The migration was added but not applied to the user's database. PostgreSQL concurrency/rollback scenarios and browser playback/citation behavior were not run in this change.
+
+### References
+
+- [Transcript service](../services/transcript-service.md)
+- [Canonical transcript decision](../decisions/canonical-transcript-and-evidence-workspace.md)
+- [UX map](../product/library-and-source-workspace.md)
+- [Migration 005](../../backend/migrations/005_source_transcripts.sql)
+
+## 2026-11-03 — Transcript lifecycle validation and browser QA
+
+### Previous approach
+
+The evidence workspace was implemented and production builds passed, but the new transcript migration and lifecycle had not yet been exercised against PostgreSQL or in a browser.
+
+### Problem discovered
+
+The important risks were transaction rollback after transcript metadata changes begin, keeping a legacy source's searchable chunks available when caption refresh fails, deduplicating concurrent refresh retries, and making the cited transcript moment visible after navigation. A backend-only review could not establish that the last interaction was useful in the actual responsive layout.
+
+### New approach
+
+- Extend the isolated PostgreSQL lifecycle suite to force a transcript-segment constraint failure after chunk replacement and transcript metadata writes begin, then assert rollback preserves the old index and does not publish a partial transcript.
+- Model migration-era sources with existing chunks but no transcript row. Verify refresh failure leaves the source `READY` and preserves its Q&A chunks, then concurrently retry twice and assert one retry-count increment before successful transcript/chunk publication.
+- Run browser QA with a synthetic source and saved citation. A controlled IFrame API stub verifies the exact citation timestamp reaches `seekTo`; its error callback verifies the external YouTube fallback.
+- Download TXT, SRT, and VTT through the UI and inspect their filenames and format contents. Check the stacked workspace at 390px for horizontal overflow.
+- Automate the 390px evidence-workspace overflow check as part of the same Chromium suite.
+- Fix the citation navigation gap found in the browser: after loading the nearest transcript page, center the active segment in the transcript's own scroll pane.
+
+### Why this is better
+
+The integration test now exercises PostgreSQL constraints, transaction rollback, job-row locking, and cumulative retry semantics rather than inferring them from mocks. The browser check found a real usability defect that was invisible in code review: the citation was highlighted in data but could remain outside the transcript's visible scroll area.
+
+### Trade-offs and deferred work
+
+The player contract and failure callback were controlled in-browser; this does not verify playback availability for a live YouTube video. The test app had no AI provider key, so it displayed the expected degraded-provider notice and made no provider request. A repeatable Playwright test harness, live-provider checks, and other transcript UI states remain separate work.
+
+### Verification
+
+The isolated PostgreSQL suite passed all 14 tests. Browser QA verified timestamp seek, transcript highlight/centering, player error fallback, and completed TXT/SRT/VTT downloads. At a 390px viewport the workspace stacked and the document had no horizontal overflow. The frontend production build passed after the citation-scroll change. Test fixture rows were removed from the disposable database; the user's development database was not used.
+
+### References
+
+- [Transcript service and validation record](../services/transcript-service.md#testing-strategy)
+- [PostgreSQL lifecycle integration test](../../backend/test/postgres-lifecycle.integration.test.ts)
+- [Transcript panel](../../frontend/src/components/TranscriptPanel.tsx)
+- [Browser QA screenshot](../../output/playwright/transcript-evidence-qa.png)
+
+## 2026-11-03 — Repeatable Playwright source evidence suite
+
+### Previous approach
+
+Citation seeking, player fallback, downloads, transcript states, and responsive layout had been checked in a manually launched browser session. Those checks depended on hand-created rows and were not directly repeatable by a new developer or a CI runner.
+
+### Problem discovered
+
+The transcript feature crosses browser state, Express endpoints, PostgreSQL full-text search, cursor paging, exports, and durable refresh jobs. Component mocks would skip the database behavior that defines those contracts. Running the ingestion worker during every browser test would instead make state timing depend on caption availability from YouTube.
+
+### New approach
+
+- Add root Playwright Test configuration and `npm run test:e2e`, with a Chromium project, failure screenshots/traces, and owned API/UI web servers on ports `8218` and `4178`.
+- Orchestrate only `docker-compose.test.yml`: apply migrations, reset source rows after verifying the exact loopback `vidscribe_test` database, and stop the PostgreSQL container only when the test runner started it. Preserve the named test volume.
+- Serve the real Express app without its ingestion worker, seed transcript/conversation fixtures in PostgreSQL, and use real API routes for transcript search, paging, exports, refresh queueing, and browser polling.
+- Stub only the YouTube IFrame API for deterministic seek and player-error checks. Simulate retryable failure and worker publication through transactional test fixture updates.
+- Remove redundant synchronous loading resets from the transcript-fetch effect and derive player-requested state from the manual load action or current citation request. This keeps the UI lint-clean while preserving citation navigation behavior.
+
+### Why this is better
+
+The browser now exercises actual UI/API/database behavior in a clean, repeatable environment without touching the developer database, making billable model calls, or relying on live caption availability. The exact database guard ensures fixture reset cannot target a differently named local database. Backend integration tests remain the place for actual worker lease, transaction, and concurrency behavior.
+
+### Trade-offs and deferred work
+
+The suite requires Docker Desktop and a one-time Playwright Chromium install. It does not verify live YouTube playback, caption retrieval, or answer-provider availability. One worker keeps test data progression sequential; parallel browser workers would need isolated databases or schema-level fixture isolation. CI configuration is deferred until the repository has a CI provider.
+
+### Verification
+
+`npm run test:e2e` passed 5/5 Chromium tests on 2026-11-03 against the isolated database after migrations `001`–`005`: citation seek and transcript centering, player fallback, three export formats, transcript search and no-results, paging from 100 to 160 segments, 390px mobile overflow, legacy missing → processing → retryable failed → processing → ready, and terminal non-retryable failure. `npm run build` and `npm run lint` passed. No LLM or YouTube request was made. The runner stopped its test PostgreSQL container, closed its API/Vite processes on `8218`/`4178`, and did not open port `3000`.
+
+### References
+
+- [Automated browser suite decision](../decisions/automated-browser-suite.md)
+- [Playwright configuration](../../playwright.config.mts)
+- [Browser scenarios](../../e2e/source-evidence.spec.ts)
+- [Test runner](../../scripts/test-e2e.mjs)
+- [Transcript service testing strategy](../services/transcript-service.md#testing-strategy)
+
 ## Change entry template
 
 ```markdown

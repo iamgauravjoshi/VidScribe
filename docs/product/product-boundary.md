@@ -1,13 +1,14 @@
 # VidScribe Product Boundary
 
-**Status:** Working v1 product decision, 2026-10-30  
+**Status:** Working v1 product decision, 2026-11-03
+
 **Release target:** Local-first, single-user web application
 
 This document defines what VidScribe is trying to be in its first useful release. It separates the desired product from the capabilities currently implemented in the repository.
 
-## Implementation checkpoint — 2026-10-30
+## Implementation checkpoint — 2026-11-03
 
-The current vertical slice implements the library, durable source/job processing, retry/removal, PostgreSQL full-text retrieval, Gemini/OpenAI/Claude answer providers, timestamp citations, and one persisted conversation per source. Each answer turn has durable status and safe failure/retry metadata. Transcript indexing stays on the local PostgreSQL instance and does not require Ollama. The product boundary below remains the target; multi-user access, additional source adapters, retrieval evaluation, and background chat workers remain future work.
+The current vertical slice implements the library, durable source/job processing, retry/removal, canonical timestamped transcript storage, local transcript search and export, in-app player/citation seeking, PostgreSQL full-text retrieval, Gemini/OpenAI/Claude answer providers, and one persisted conversation per source. Each answer turn has durable status and safe failure/retry metadata. Transcript indexing stays on the local PostgreSQL instance and does not require Ollama. Historical ready sources can explicitly rebuild missing transcript segments while keeping their existing Q&A available. The product boundary below remains the target; multi-user access, additional source adapters, retrieval evaluation, and background chat workers remain future work.
 
 ## Product statement
 
@@ -32,10 +33,12 @@ A self-directed learner, researcher, or knowledge worker who regularly watches l
 - One local user and one local library. No account creation is needed to use the first release.
 - YouTube URLs as the only supported input source.
 - Public videos with an English transcript/captions available through the current transcript integration.
+- Persist the original timestamped transcript segments separately from the derived overlapping retrieval chunks.
+- Read and search a source transcript, export TXT/SRT/VTT, and seek the player from transcript timestamps and answer citations.
 - A persistent library where the user can find, reopen, retry, and remove sources.
 - Clear processing states and useful failure messages. Ingestion should not require the browser to remain blocked until all model work finishes.
 - Questions scoped to one selected source at a time.
-- Answers grounded in retrieved transcript text, with clickable timestamp citations that open the YouTube video at the cited moment.
+- Answers grounded in retrieved transcript text, with citations that seek the in-app player and retain an external YouTube fallback.
 - One persistent conversation per source in the first UI, with messages that survive a page refresh and application restart. Multiple named conversations per source are deferred.
 - Local PostgreSQL full-text persistence/search and an explicit choice of Gemini, OpenAI, Claude, or optional Ollama for answer generation. Gemini is the default selection and must be configured by the user before it can generate answers.
 - A setup and dependency-health experience that tells the user when PostgreSQL or the selected answer provider is unavailable or unconfigured.
@@ -59,8 +62,9 @@ These are deferred product options, not commitments. A second source should be s
 2. VidScribe validates the URL and reports that the source was accepted.
 3. The source appears in the library immediately with a visible state: queued, processing, ready, or failed. Failure includes a reason and a retry action where retry is safe.
 4. When ready, the user opens the source workspace and asks a question about that source.
-5. VidScribe returns an answer with citations. Selecting a citation opens the source video at the relevant timestamp.
-6. The conversation and source remain available after a refresh or restart. The user can remove the source and its derived data.
+5. The workspace lets the user read/search/export the transcript, or load the YouTube player to watch it.
+6. VidScribe returns an answer with citations. Selecting a citation seeks the player and highlights transcript context; the user can still open the video externally.
+7. The conversation and source remain available after a refresh or restart. The user can remove the source and its derived data.
 
 ## Product principles
 
@@ -86,9 +90,11 @@ V1 is useful when a new user can complete these tasks without losing work or gue
 - Retry an eligible failure without creating duplicate sources or duplicate searchable chunks.
 - Refresh or restart and still find a ready source and its prior conversation.
 - Ask a question and receive an answer whose timestamp citation opens the relevant part of the video.
+- Read, search, and export the original transcript without using overlapping retrieval chunks as a substitute.
+- Select a transcript timestamp or citation and jump to the corresponding player moment; retain an external fallback when embedding is unavailable.
 - Add a provider API key, select an answer provider, and use its configured model without changing the local indexing/retrieval pipeline; Gemini is selected by default and missing-key state is clear.
 - Receive a clear “not enough evidence” response when no useful transcript passage is retrieved.
-- Remove a source and confirm its transcript chunks and conversations are removed according to the documented retention behavior.
+- Remove a source and confirm its transcript segments, retrieval chunks, and conversations are removed according to the documented retention behavior.
 - Get an actionable message if PostgreSQL is unavailable or the selected answer provider is unconfigured/unavailable.
 
 These are product acceptance criteria. Business metrics such as retention or answer quality thresholds should be set after observing real user sessions rather than inventing numbers now.

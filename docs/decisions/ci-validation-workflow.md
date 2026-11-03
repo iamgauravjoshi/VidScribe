@@ -1,6 +1,6 @@
 # Pull request validation with GitHub Actions
 
-**Status:** Accepted — hosted follow-up run pending
+**Status:** Accepted — hosted baseline passed; timestamp-correction changes pending a fresh run
 **Date:** 2026-11-03
 
 ## Problem
@@ -36,6 +36,8 @@ This workflow reuses the exact isolated test database and browser runner already
 
 The workflow publishes a named check (`Build, PostgreSQL, and Playwright`). It does not itself change repository branch-protection settings; requiring the check before merge is a GitHub repository policy decision.
 
+Real-source retrieval measurement is intentionally separate from the required gate. The opt-in `real-source-evaluation.yml` workflow runs only when the `evaluate-real-source-search` label is applied to a pull request or it is manually dispatched. It uses a fresh isolated PostgreSQL database, fetches captions from three public YouTube sources, and measures local search/citation behavior without an answer-provider call or key. This sample can be affected by caption availability and is diagnostic rather than a merge gate.
+
 ## Example
 
 For a pull request that changes transcript publication, the build and lint run first. The integration test then migrates a fresh test database and checks rollback/retry/concurrency behavior. Playwright reuses that database, seeds its own source fixtures, and checks transcript search, citations, exports, refresh states, and responsive layout through the real API and UI. A failing browser assertion produces trace/screenshot files that are downloadable from the Actions run.
@@ -47,7 +49,7 @@ For a pull request that changes transcript publication, the build and lint run f
 - PostgreSQL startup or test failures still execute the database cleanup step. The `down` command stops containers but preserves the named test volume.
 - The integration test requires `VIDSCRIBE_TEST_DATABASE_URL` and a database name containing `test`; the test Compose target uses the dedicated `vidscribe_test` database. No production or development database credentials are provided.
 - A cancelled or timed-out workflow may not complete every cleanup operation; the GitHub-hosted runner is ephemeral and is discarded after the job.
-- The first attempt failed in the backend build because the TypeScript 7 Linux compiler package was absent from the Windows-generated lockfile. Aligning the backend with the existing TypeScript 6 compiler is the selected fix; only a new clean hosted run can confirm the cross-platform gate.
+- The first attempt failed in the backend build because the TypeScript 7 Linux compiler package was absent from the Windows-generated lockfile. Aligning the backend with the existing TypeScript 6 compiler fixed the problem; hosted run 41594485760 passed build, lint, 14/14 backend/PostgreSQL tests, and 5/5 Chromium tests. The timestamp-unit correction adds another migration test and must pass a fresh hosted run before this PR is complete.
 
 ## Concurrency scenario
 
@@ -59,7 +61,7 @@ Runs for the same pull request/ref share a concurrency group. A newer commit can
 - **Cost:** the real browser and PostgreSQL make the workflow slower than unit-only CI. Chromium installation and database startup consume hosted runner minutes.
 - **Scope:** this gate validates current local application behavior. It does not validate live caption availability, real YouTube playback, provider credentials/model access, deployment, or semantic answer truthfulness.
 - **Enforcement:** the workflow creates a check, but administrators must configure GitHub branch protection if merges should be blocked until it passes.
-- **Reliability evidence:** local success verifies the script path; the hosted PR run must pass before this gate is considered reliable. Repeated failures should be classified as code defects, environment assumptions, or flaky checks before adding retries.
+- **Reliability evidence:** the hosted PR run 41594485760 passed the complete baseline gate in about 65 seconds. The follow-up run validates the new timestamp-unit migration and adapter tests as part of this PR. Repeated failures should be classified as code defects, environment assumptions, or flaky checks before adding retries.
 
 ## Alternatives
 
@@ -77,6 +79,6 @@ Runs for the same pull request/ref share a concurrency group. A newer commit can
 
 **Does this guarantee the check is required before merge?** No. GitHub branch protection or a repository ruleset must require the named check; the workflow only runs and reports it.
 
-**Why do real-source retrieval and citation evaluation come later?** The gate should first be shown to run reliably without depending on external captions or AI APIs. Once it passes on GitHub, a separate small evaluation can measure the current lexical retrieval/citation baseline on representative real transcripts and inform product priorities.
+**Why is real-source retrieval evaluation opt-in?** Caption fetching depends on an external provider and can fail independently of VidScribe changes. The required gate therefore remains deterministic and secret-free. A labeled/manual workflow still allows a real-caption sample when product decisions need evidence, without making every pull request wait on YouTube.
 
 **When should jobs be split or cached more aggressively?** After hosted run duration shows a real bottleneck. Today one job avoids duplicate installs and shares one test database across the two database-backed suites.

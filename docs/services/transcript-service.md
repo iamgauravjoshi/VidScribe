@@ -27,7 +27,7 @@ It does not own source URL parsing, caption fetching, retrieval chunking, answer
 
 ## Input and output
 
-`GET /api/sources/:sourceId/transcript` accepts `limit` (1–200, default 100), an optional non-negative `cursor`, a bounded `query` (up to 200 characters), or an optional `around` timestamp. A timestamp lookup and a cursor/search query cannot be combined. The response contains transcript state and provenance, up to `limit` segments, and a continuation cursor. Segment records expose `segmentIndex`, `startSeconds`, `durationSeconds`, and text; SQL rows are not returned directly.
+`GET /api/sources/:sourceId/transcript` accepts `limit` (1–200, default 100), an optional non-negative `cursor`, a bounded `query` (up to 200 characters), or an optional `around` timestamp. A timestamp lookup and a cursor/search query cannot be combined. The response contains transcript state and provenance, up to `limit` segments, and a continuation cursor. Segment records expose `segmentIndex`, `startSeconds`, `durationSeconds`, and text; SQL rows are not returned directly. All persisted times are seconds, normalized at the YouTube adapter boundary before chunking.
 
 `GET /api/sources/:sourceId/transcript/export?format=txt|srt|vtt` returns a fixed source-ID filename and the matching UTF-8 media type. `POST /api/sources/:sourceId/transcript/rebuild` queues missing or retryably failed transcript data for a ready source.
 
@@ -84,6 +84,12 @@ The automated browser suite runs with `npm run test:e2e`. It starts the dedicate
 The isolated PostgreSQL suite passed all 14 tests, including transcript publication rollback after the transcript metadata write begins, preservation of the ready source and old chunks on a failed legacy refresh, concurrent retry requests that increment the cumulative retry count only once, and successful publication after retry. The browser QA used a synthetic local source and a controlled IFrame API stub: selecting a saved citation invoked `seekTo` with the citation timestamp, centered the matching transcript segment in its scroll pane, and an injected player error showed the external YouTube fallback. TXT, SRT, and VTT downloads completed in the browser; filenames, cue/timestamp structure, and transcript text were checked. At a 390px viewport the workspace stacked into one column without horizontal overflow.
 
 The YouTube player behavior was exercised through the IFrame API contract stub rather than a live YouTube video. The isolated app had no provider key, so its health check returned the expected degraded response and the UI displayed the provider setup notice; no provider call was made. The browser fixture was stored only in the disposable test database and removed afterward.
+
+## Timestamp unit correction
+
+The real-caption probe found that `youtube-transcript` 1.3.1 can return srv3 caption offsets and durations in milliseconds, even though the application contract and classic parser use seconds. New ingestion normalizes both values before chunk creation. Migration `006_normalize_youtube_transcript_times.sql` detects existing millisecond-valued segment durations using their median and repairs transcript segments, corresponding search-chunk bounds, and timestamps/URLs in saved answer citations in the same migration transaction. For older chunk-only sources with no transcript segment rows, it applies a conservative millisecond-span heuristic. Second-valued records remain unchanged.
+
+The repository integration scenario deliberately inserts pre-fix millisecond rows and a saved citation, reruns migration 006, and checks the repaired values and an unaffected seconds-valued source. Unit coverage exercises both upstream timestamp formats. Because the legacy chunk-only heuristic cannot inspect caption durations, it is intentionally conservative; sources with no canonical segments and unusually long chunk spans should be reviewed if a future source adapter uses different chunk sizing.
 
 ### Automated browser suite — 2026-11-03
 

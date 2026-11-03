@@ -13,6 +13,7 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspace=@vidscribe/backend",
     "test:e2e": "node scripts/test-e2e.mjs",
+    "eval:real-sources": "npm run eval:real-sources --workspace=@vidscribe/backend",
     "lint": "npm run lint --workspace=@vidscribe/frontend",
     "db:migrate": "npm run db:migrate --workspace=@vidscribe/backend"
   },

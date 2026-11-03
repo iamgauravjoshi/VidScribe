@@ -40,6 +40,8 @@ Retrieval uses one read statement and requires no transaction beyond the stateme
 
 The disposable PostgreSQL integration test verifies nullable-vector inserts, English stemming/matching, positive ranks, stopword-only no-match, source isolation, atomic replacement, and the four-case labeled `Recall@3` baseline. It also checks timestamp citations map to the exact retrieved source chunks. Provider calls are not needed to test retrieval; keep retrieval quality cases deterministic and provider-free before tuning OR matching, ranking, chunk size, or a future semantic fallback.
 
+For product prioritization, the real-source evaluation runs the same PostgreSQL retrieval repository over three explicitly labeled public transcripts, with two questions per source and a manually selected target segment for each question. It reports Recall@5, MRR, whether the cited chunk range covers the target, the distance between the target and citation start, and citation URL integrity. It uses the real caption-ingestion path but does not invoke an answer provider. Its six examples are directional evidence only; they do not measure generated answer factuality or represent the full range of source lengths and speakers.
+
 ## Future evolution
 
 Full-text matching is appropriate for a local single-user transcript library but misses synonyms and paraphrases without overlapping terms. Consider a hybrid FTS/vector strategy only after measuring answer quality and latency. Any embedding path must preserve the user's transcript privacy choice, identify the embedding model per index generation, and use matching query vectors. Search languages should become source metadata before adding non-English inputs.

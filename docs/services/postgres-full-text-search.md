@@ -19,11 +19,12 @@ It does not call Gemini, generate embeddings, decide answer quality, construct p
 
 1. The worker fetches English captions and segments them into timestamped overlapping chunks.
 2. In the final source-publication transaction, the repository inserts chunk text and nullable legacy vector data. PostgreSQL computes GIN entries as part of the insert.
-3. For a question, the repository uses `plainto_tsquery('english', question)`. VidScribe changes the generated conjunctions into OR terms so natural-language questions can match a passage on some meaningful words. The input remains a bound parameter; it is not interpolated into SQL.
-4. The query uses the same `to_tsvector('english', content)` expression as the GIN index, filters by source ID, ranks with `ts_rank_cd`, and breaks ties by chunk index.
-5. RAG passes selected excerpts to the configured answer provider and maps the same rows to citations.
+3. For a question, the repository creates an OR query for broad candidate matching, an all-terms query, and an ordered phrase query. The question remains a bound SQL parameter.
+4. The GIN-indexed chunk search filters by source ID and ranks matches with `ts_rank_cd`. It materializes the original top-K chunk candidates before any reranking, preserving the candidate set and its recall ceiling.
+5. For each candidate chunk, a lateral lookup finds the best matching canonical transcript segment whose start falls inside that chunk's time range. Segment ordering favors phrase match, then all-question-terms match, then length-normalized cover-density rank, then earlier segment position. The candidate chunks are reranked using segment/chunk phrase match, full-query match, length-normalized segment or chunk relevance, original chunk relevance, and chunk index as deterministic tie-breaks. Using the same normalization for the segment and fallback chunk score keeps the comparison on a consistent rank scale.
+6. RAG still sends complete selected chunks as context. Citation mapping points to the selected transcript segment's start/end and excerpt, then deduplicates repeated segments caused by overlapping chunks. Sources without canonical transcript segments fall back to the chunk's timestamp and text.
 
-The current transcripts are English, so the English text configuration applies stemming and drops stopwords. A question containing no searchable terms returns zero matches. The score is an FTS rank, not a probability and not comparable to the cosine similarity used by the historical vector path.
+The current transcripts are English, so the English text configuration applies stemming and drops stopwords. A question containing no searchable terms returns zero matches. FTS scores are ranking signals, not probabilities and not comparable to the cosine similarity used by the historical vector path. Reranking does not expand beyond the original top-K candidate set; it improves ordering and selects a more precise citation only among those candidates.
 
 ## Schema compatibility
 
@@ -37,9 +38,9 @@ The current migration creates the GIN index in a transaction and is suitable for
 
 ## Testing strategy
 
-Use the isolated PostgreSQL integration database, not mocks, to verify the actual `tsvector`/`tsquery` semantics and GIN expression. Cover stemming, OR matching, no searchable terms, source isolation, rank ordering, and behavior when new chunks have no embedding. The versioned retrieval fixture in `backend/test/fixtures/retrieval-evaluation.ts` adds four labeled questions over a synthetic transcript and asserts the current `Recall@3` baseline of 0.75. One paraphrase case deliberately records the known lexical miss. For each retrieved expected chunk, the integration test verifies citation excerpt, source video ID, and start/end timestamps. A populated legacy fixture should confirm migration preserves old vectors while making their text searchable.
+Use the isolated PostgreSQL integration database, not mocks, to verify the actual `tsvector`/`tsquery` semantics and GIN expression. Cover stemming, OR matching, no searchable terms, source isolation, rank ordering, a phrase-match versus repeated-term decoy, precise segment selection, legacy chunk-only fallback, citation deduplication, and behavior when new chunks have no embedding. The versioned synthetic fixture still asserts its `Recall@3` baseline of 0.75, including one deliberate lexical paraphrase miss. The provider-free real-source sample compares chunk ranking with segment-aware reranking; results and limits are in the [evaluation report](../evaluations/real-source-search-2026-11-03.md).
 
-This is a deterministic SQL/retrieval/citation regression check. It does not evaluate generated answer correctness, retrieval on user transcripts, cross-language behavior, or production search quality. Keep expected chunks human-labeled and expand the corpus with representative examples before changing ranking or adding semantic retrieval.
+These are deterministic SQL/retrieval/citation regression checks plus a small provider-free real-transcript sample. They do not establish generated-answer correctness, cross-language behavior, or production search quality. Keep expected evidence human-labeled and expand the corpus before changing the candidate strategy or adding semantic retrieval.
 
 ## Future evolution
 

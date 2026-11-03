@@ -1,7 +1,7 @@
 # Real-source search and citation baseline
 
 **Date:** 2026-11-03  
-**Status:** Diagnostic baseline; expand before making broad product claims
+**Status:** Baseline and first reranking comparison; expand before making broad product claims
 
 ## Purpose
 
@@ -16,7 +16,7 @@ Measure the current PostgreSQL lexical retrieval path on real transcripts before
 - Citation start distance is the absolute time difference between the anchor segment and the start of the relevant retrieved chunk.
 - No LLM or provider calls were made. The temporary database container and volume were removed after the run.
 
-## Results
+## Baseline results: chunk-only ranking
 
 | Measure | Result | Interpretation |
 | --- | ---: | --- |
@@ -39,17 +39,35 @@ Measure the current PostgreSQL lexical retrieval path on real transcripts before
 | 3Blue1Brown, *But what is a neural network?* | Neural network neurons | 1 | 70.26 s | Yes |
 | 3Blue1Brown, *But what is a neural network?* | Connection importance | 5 | 47.62 s | Yes |
 
+## Phase result: segment-aware reranking and citations
+
+The retrieval query now preserves the original chunk-level top-five candidate set, then reranks those five candidates using phrase matches, complete-question matches, and the best matching canonical transcript segment. The answer model still receives the complete retrieved chunks; the selected segment only narrows citation text and seek time. This separates evidence context from the UI's precise citation target.
+
+| Measure | Previous chunk-only ranking | Segment-aware reranking | Change |
+| --- | ---: | ---: | ---: |
+| Recall@1 | 0.333 (2 / 6) | 0.500 (3 / 6) | +1 query in first place |
+| Recall@3 | 0.667 (4 / 6) | 0.833 (5 / 6) | +1 query in top three |
+| Recall@5 | 1.000 (6 / 6) | 1.000 (6 / 6) | Preserved |
+| Mean reciprocal rank | 0.547 | 0.672 | +0.125 (about 23%) |
+| Median absolute anchor-to-chunk-start distance | 58.44 s | 58.44 s | Context chunks unchanged |
+| Median absolute anchor-to-citation-start distance | Not measured separately; chunk start used | 15.57 s | About 73% closer |
+| Segment citation available when relevant chunk found | Not applicable | 1.000 (6 / 6) | Exact caption segment selected in this sample |
+| Valid video/timestamp link rate | 1.000 (6 / 6) | 1.000 (6 / 6) | Preserved |
+
+The new relevant ranks are 1, 3, 2, 5, 1, and 1. All six returned citation URLs use the selected segment's start time, and each matching segment was found. Citation precision here is measured against the labeled anchor segment, not through subjective player testing.
+
 ## Product implication
 
-The current search found all six labeled passages within its top five, so this sample does not justify adding vector search or another source type by itself. Ranking is the clearest retrieval weakness: relevant evidence appears as low as rank five, and the mean reciprocal rank is 0.547. Citation links are structurally valid, while the roughly one-minute gap between the anchor and chunk start suggests that citation seeking could be more precise.
+The reranker improved the first relevant result's position without changing which chunks were eligible for the top five, and segment citations narrowed the measured anchor-to-start gap. This is useful evidence for the implementation, but six hand-labeled questions are too few to show that the gains generalize or to establish answer quality.
 
-**Recommended next capability:** improve evidence ranking and timestamp precision before adding a second source adapter. First compare ranking strategies and more precise segment-level citation targets against a larger labeled set, including difficult paraphrases. Keep the lexical PostgreSQL path as the baseline and defer a semantic-indexing change until measurements show it is needed.
+**Recommended next step:** expand the labeled set across more sources, question styles, and longer transcripts; verify human-perceived seek quality and whether the cited segment actually supports generated answers. Keep PostgreSQL full-text search as the measured baseline. After that evaluation, decide whether a second input adapter offers more product value than hybrid semantic retrieval. Do not infer a need for vector search from this small sample.
 
 ## Limitations
 
 - Three educational videos and six hand-selected anchors are a small convenience sample, not a representative benchmark.
 - Relevance means that the returned chunk spans a manually selected transcript anchor. It does not establish that a generated answer is complete, factually correct, or supported strongly enough for a human reader.
 - Link validation checks the expected video ID and timestamp parameter; it does not automate YouTube playback or verify the user's perceived jump precision.
+- The reranking comparison uses the same three sources and six labels as the baseline. It is a paired diagnostic, not an independently sampled validation set.
 - The sample uses `Recall@5`, while the existing synthetic fixture reports `Recall@3 = 0.75`; the scores should not be compared directly because their cutoffs and corpora differ.
 - Caption access varies by environment. GitHub-hosted runners could not fetch these same captions, while the local run could.
 

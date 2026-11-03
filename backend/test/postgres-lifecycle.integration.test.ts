@@ -349,11 +349,19 @@ test(
         const citation = citationService.mapRetrievedChunk(matchedExpectedChunk);
         const citationUrl = new URL(citation.href);
         assert.equal(citation.id, String(matchedExpectedChunk.id));
-        assert.equal(citation.excerpt, matchedExpectedChunk.content);
+        assert.equal(
+          citation.excerpt,
+          matchedExpectedChunk.citation_excerpt ?? matchedExpectedChunk.content,
+        );
         assert.equal(citationUrl.searchParams.get('v'), externalId);
-        assert.equal(citationUrl.searchParams.get('t'), `${matchedExpectedChunk.start_seconds}s`);
-        assert.equal(citation.startSeconds, matchedExpectedChunk.start_seconds);
-        assert.equal(citation.endSeconds, matchedExpectedChunk.end_seconds);
+        const citationStartSeconds =
+          matchedExpectedChunk.citation_start_seconds ?? matchedExpectedChunk.start_seconds;
+        assert.equal(citationUrl.searchParams.get('t'), `${citationStartSeconds}s`);
+        assert.equal(citation.startSeconds, citationStartSeconds);
+        assert.equal(
+          citation.endSeconds,
+          matchedExpectedChunk.citation_end_seconds ?? matchedExpectedChunk.end_seconds,
+        );
       }
 
       const recallAtK = expectedHitsAtK / RETRIEVAL_EVALUATION.cases.length;
@@ -362,9 +370,71 @@ test(
         `Retrieval recall@${RETRIEVAL_EVALUATION.topK} was ${recallAtK.toFixed(2)}; expected at least ${RETRIEVAL_EVALUATION.minimumRecallAtK}.`,
       );
 
+      await pool.query(
+        `
+          INSERT INTO source_chunks (
+            source_id, chunk_index, content, start_seconds, end_seconds, embedding
+          ) VALUES
+            ($1, 200, 'Reward-based learning shapes habits through practice.', 200, 210, NULL),
+            ($1, 201, REPEAT('Habits shape reward-based learning; ', 20), 220, 230, NULL)
+        `,
+        [sourceId],
+      );
+      const phraseRankedChunks = await retrieval.searchSourceChunksByText(
+        sourceId,
+        'How does reward-based learning shape habits?',
+        5,
+      );
+      assert.equal(phraseRankedChunks[0]?.chunk_index, 200);
+      assert.equal(phraseRankedChunks[0]?.phrase_match, true);
+      const scatteredTermsChunk = phraseRankedChunks.find((chunk) => chunk.chunk_index === 201);
+      assert.equal(scatteredTermsChunk?.full_query_match, true);
+      assert.equal(scatteredTermsChunk?.phrase_match, false);
+      await pool.query(
+        'DELETE FROM source_chunks WHERE source_id = $1 AND chunk_index IN (200, 201)',
+        [sourceId],
+      );
+
+      const supportingSentence =
+        'Answers cite transcript excerpts with YouTube timestamps so readers can open the video at the supporting moment.';
+      await pool.query(
+        `
+          UPDATE source_chunks
+          SET content = content || ' ' || $2, end_seconds = 45
+          WHERE source_id = $1 AND chunk_index = 0
+        `,
+        [sourceId, supportingSentence],
+      );
+      const preciseCitationCandidates = await retrieval.searchSourceChunksByText(
+        sourceId,
+        'How can readers open the video at the supporting moment?',
+        5,
+      );
+      const combinedChunk = preciseCitationCandidates.find((chunk) => chunk.chunk_index === 0);
+      assert.ok(combinedChunk);
+      const preciseCitation = citationService.mapRetrievedChunk(combinedChunk);
+      const preciseCitationUrl = new URL(preciseCitation.href);
+      assert.equal(combinedChunk.start_seconds, 12, 'the RAG context keeps the wider chunk start');
+      assert.equal(preciseCitation.startSeconds, 30, 'the citation seeks to the matching transcript segment');
+      assert.equal(preciseCitation.endSeconds, 45);
+      assert.equal(preciseCitation.excerpt, supportingSentence);
+      assert.equal(preciseCitationUrl.searchParams.get('t'), '30s');
+
       // Model a legacy source upgraded from before migration 005: it has the
       // completed retrieval chunks but no canonical transcript row.
       await pool.query('DELETE FROM source_transcripts WHERE source_id = $1', [sourceId]);
+      const legacyTranscriptMatches = await retrieval.searchSourceChunksByText(
+        sourceId,
+        'How does PostgreSQL rank matching transcript passages?',
+        5,
+      );
+      const legacyTranscriptChunk = legacyTranscriptMatches.find((chunk) => chunk.chunk_index === 0);
+      assert.ok(legacyTranscriptChunk);
+      assert.equal(legacyTranscriptChunk.citation_segment_index, null);
+      const legacyTranscriptCitation = citationService.mapRetrievedChunk(legacyTranscriptChunk);
+      assert.equal(legacyTranscriptCitation.startSeconds, 12);
+      assert.equal(legacyTranscriptCitation.endSeconds, 45);
+      assert.equal(legacyTranscriptCitation.excerpt, legacyTranscriptChunk.content);
 
       // Preparing that legacy transcript uses the existing job row while
       // keeping the already-ready source and its old evidence usable.

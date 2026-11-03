@@ -109,10 +109,27 @@ async function main(): Promise<void> {
     question: string;
     targetSeconds: number;
     relevantRank: number | null;
+    hitAt1: boolean;
+    hitAt3: boolean;
     hitAt5: boolean;
-    relevantCitationStartSeconds: number | null;
+    relevantChunkStartSeconds: number | null;
+    citationStartSeconds: number | null;
+    chunkStartOffsetSeconds: number | null;
     citationStartOffsetSeconds: number | null;
+    citationSegmentFound: boolean;
     citationLinkValid: boolean;
+    topMatches: Array<{
+      rank: number;
+      chunkIndex: number;
+      relevanceScore: number;
+      phraseMatch: boolean;
+      fullQueryMatch: boolean;
+      citationSegmentIndex: number | null;
+      citationStartSeconds: number | null;
+      citationPhraseMatch: boolean | null;
+      citationFullQueryMatch: boolean | null;
+      citationRelevanceScore: number | null;
+    }>;
   }> = [];
   const sourceResults: Array<{
     title: string;
@@ -230,9 +247,11 @@ async function main(): Promise<void> {
           relevantChunk &&
           relevantCitation &&
           citationUrl?.searchParams.get('v') === sourceInput.videoId &&
-          parsedCitationTimestamp === Math.floor(relevantChunk.start_seconds!),
+          relevantCitation.startSeconds !== null &&
+          parsedCitationTimestamp === Math.floor(relevantCitation.startSeconds),
         );
-        const citationStartSeconds = relevantChunk?.start_seconds ?? null;
+        const chunkStartSeconds = relevantChunk?.start_seconds ?? null;
+        const citationStartSeconds = relevantCitation?.startSeconds ?? null;
 
         queryResults.push({
           sourceTitle: sourceInput.title,
@@ -241,15 +260,38 @@ async function main(): Promise<void> {
           question: queryInput.question,
           targetSeconds,
           relevantRank: relevantIndex >= 0 ? relevantIndex + 1 : null,
-          hitAt5: relevantIndex >= 0,
-          relevantCitationStartSeconds: citationStartSeconds,
+          hitAt1: relevantIndex === 0,
+          hitAt3: relevantIndex >= 0 && relevantIndex < 3,
+          hitAt5: relevantIndex >= 0 && relevantIndex < 5,
+          relevantChunkStartSeconds: chunkStartSeconds,
+          citationStartSeconds,
+          chunkStartOffsetSeconds:
+            chunkStartSeconds === null ? null : Math.abs(targetSeconds - chunkStartSeconds),
           citationStartOffsetSeconds:
             citationStartSeconds === null ? null : Math.abs(targetSeconds - citationStartSeconds),
+          citationSegmentFound: Boolean(
+            relevantChunk && relevantChunk.citation_segment_index !== null,
+          ),
           citationLinkValid,
+          topMatches: rankedChunks.map((chunk, index) => ({
+            rank: index + 1,
+            chunkIndex: chunk.chunk_index,
+            relevanceScore: chunk.relevanceScore,
+            phraseMatch: chunk.phrase_match,
+            fullQueryMatch: chunk.full_query_match,
+            citationSegmentIndex: chunk.citation_segment_index,
+            citationStartSeconds: chunk.citation_start_seconds,
+            citationPhraseMatch: chunk.citation_phrase_match,
+            citationFullQueryMatch: chunk.citation_full_query_match,
+            citationRelevanceScore: chunk.citation_relevance_score,
+          })),
         });
       }
     }
 
+    const chunkStartOffsets = queryResults
+      .map((result) => result.chunkStartOffsetSeconds)
+      .filter((offset): offset is number => offset !== null);
     const citationOffsets = queryResults
       .map((result) => result.citationStartOffsetSeconds)
       .filter((offset): offset is number => offset !== null);
@@ -257,13 +299,23 @@ async function main(): Promise<void> {
     const expectedQueries = queryResults.length;
     const report = {
       generatedAt: new Date().toISOString(),
-      retrieval: 'PostgreSQL English full-text search; top 5 capped by application configuration',
+      retrieval:
+        'PostgreSQL English full-text search preserves the cover-density top-5 candidate set, then reranks it by best transcript-segment phrase/full-query match and segment rank; top 5 capped by application configuration',
+      citationStrategy: 'Best matching canonical transcript segment inside each retrieved chunk, with chunk-start fallback',
       providerCalls: 0,
       sourceCount: sourceResults.length,
       requestedSourceCount: sourcesToEvaluate.length,
       queryCount: queryResults.length,
       effectiveTopK: topK,
       metrics: {
+        recallAt1:
+          expectedQueries === 0
+            ? null
+            : queryResults.filter((result) => result.hitAt1).length / expectedQueries,
+        recallAt3:
+          expectedQueries === 0
+            ? null
+            : queryResults.filter((result) => result.hitAt3).length / expectedQueries,
         recallAt5:
           expectedQueries === 0
             ? null
@@ -275,7 +327,13 @@ async function main(): Promise<void> {
                 (sum, result) => sum + (result.relevantRank === null ? 0 : 1 / result.relevantRank),
                 0,
               ) / expectedQueries,
+        medianChunkStartOffsetSeconds: median(chunkStartOffsets),
         medianCitationStartOffsetSeconds: median(citationOffsets),
+        segmentCitationRateWhenRelevantChunkFound:
+          retrievedRelevantQueries.length === 0
+            ? null
+            : retrievedRelevantQueries.filter((result) => result.citationSegmentFound).length /
+              retrievedRelevantQueries.length,
         validCitationLinkRateWhenRelevantChunkFound:
           retrievedRelevantQueries.length === 0
             ? null

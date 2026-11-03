@@ -470,13 +470,15 @@ A developer could merge a change that compiled but broke PostgreSQL publication/
 - Upload Playwright screenshots, traces, and its HTML report for 14 days when the job fails. Stop the test database with an unconditional cleanup step.
 - Pin GitHub actions to full commit SHAs and grant the workflow read-only repository permissions.
 
+The first hosted run failed during the backend build: the backend used TypeScript 7's platform-specific native compiler, but the lockfile created on Windows contained the Windows binary and omitted the Linux binary used by GitHub's Ubuntu runner. No database or Playwright checks ran on that attempt. The backend has no TypeScript 7-specific language requirement, so its compiler was aligned to TypeScript 6.0.3, already used by the frontend; the platform-specific package entries were removed from the lockfile. A clean local `npm ci`, root build, frontend lint, and backend tests passed after this fix. The hosted rerun remains the reliability check.
+
 ### Why this is better
 
 Every pull request checks the same code paths developers can run locally, including PostgreSQL transactions and actual browser-to-API behavior. The provider and YouTube boundaries stay outside CI, so the merge check needs no API keys and does not incur model usage. Failure artifacts make browser regressions diagnosable without reproducing every runner environment locally.
 
 ### Trade-offs and deferred work
 
-Hosted browser/database runs take longer and cost more runner time than build-only CI. The workflow reports a check but does not alter repository branch protection; a maintainer must require the named check in branch rules if merge blocking is desired. A green local run does not prove the hosted workflow itself works, so the first successful GitHub run is the acceptance criterion. Real-source search/citation evaluation is deferred until that hosted run succeeds; it should inform whether search changes or a second source type is the more valuable next product capability.
+Hosted browser/database runs take longer and cost more runner time than build-only CI. The workflow reports a check but does not alter repository branch protection; a maintainer must require the named check in branch rules if merge blocking is desired. A green local run does not prove the hosted workflow itself works, so a successful GitHub rerun is the acceptance criterion. Real-source search/citation evaluation is deferred until that hosted run succeeds; it should inform whether search changes or a second source type is the more valuable next product capability.
 
 ### References
 

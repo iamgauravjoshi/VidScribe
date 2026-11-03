@@ -1,11 +1,13 @@
 # Pull request validation with GitHub Actions
 
-**Status:** Accepted — hosted run pending
+**Status:** Accepted — hosted follow-up run pending
 **Date:** 2026-11-03
 
 ## Problem
 
 The source evidence workspace has a repeatable Playwright suite and PostgreSQL lifecycle integration scenarios, but they only ran when a developer remembered to start them locally. The repository had no check on pull requests, so a change could merge after a build while breaking a migration, database lifecycle, or browser interaction.
+
+The first hosted run also exposed a platform-specific dependency lock issue before reaching the database or browser steps: backend TypeScript 7 depended on a native compiler package, while the Windows-generated lockfile contained only the Windows binary. The Ubuntu runner could not resolve its Linux compiler.
 
 ## Naive approach
 
@@ -21,6 +23,8 @@ Run only TypeScript builds and lint in GitHub Actions, mock the API in browser t
 ## Chosen approach
 
 The `CI` workflow runs on every `pull_request`, on pushes to `main`, and by manual dispatch. One Ubuntu job installs the locked npm workspaces, builds backend and frontend, runs frontend lint, starts the dedicated `docker-compose.test.yml` PostgreSQL database, runs the backend suite including its opt-in PostgreSQL integration case, installs Chromium, and runs `npm run test:e2e`.
+
+Both workspaces use TypeScript `~6.0.2` (6.0.3 in the lockfile). The backend has no TypeScript 7-only language dependency, and TypeScript 6 successfully builds it. Sharing the frontend's compiler removes the OS-specific native package that failed on the hosted Linux runner and keeps the two workspaces on one compiler toolchain.
 
 The workflow supplies only test-database environment variables. It does not define provider keys or call the AI provider. The browser suite uses the real local API and PostgreSQL, while its YouTube player boundary is stubbed and the ingestion worker is excluded. If the job fails, GitHub uploads Playwright's `test-results/` and HTML report for 14 days. A final `always()` step stops the Compose service and leaves its named test volume intact.
 
@@ -43,6 +47,7 @@ For a pull request that changes transcript publication, the build and lint run f
 - PostgreSQL startup or test failures still execute the database cleanup step. The `down` command stops containers but preserves the named test volume.
 - The integration test requires `VIDSCRIBE_TEST_DATABASE_URL` and a database name containing `test`; the test Compose target uses the dedicated `vidscribe_test` database. No production or development database credentials are provided.
 - A cancelled or timed-out workflow may not complete every cleanup operation; the GitHub-hosted runner is ephemeral and is discarded after the job.
+- The first attempt failed in the backend build because the TypeScript 7 Linux compiler package was absent from the Windows-generated lockfile. Aligning the backend with the existing TypeScript 6 compiler is the selected fix; only a new clean hosted run can confirm the cross-platform gate.
 
 ## Concurrency scenario
 
@@ -61,6 +66,7 @@ Runs for the same pull request/ref share a concurrency group. A newer commit can
 - **Build/lint only:** faster, but leaves the database lifecycle and user-facing transcript/citation flows unchecked.
 - **Separate build, integration, and browser jobs:** can reduce wall time, but duplicates checkout/install and requires separate database provisioning. Revisit if measured job duration becomes a problem.
 - **GitHub PostgreSQL service container:** simpler for a single integration job, but the existing E2E runner expects Docker Compose and discovers its published port; keeping the repository's Compose target avoids divergent local and hosted test environments.
+- **Keep TypeScript 7 and add its Linux binary to the lockfile:** preserves the distinct compiler, but VidScribe has no feature requiring that compiler and would retain a platform-specific optional native dependency. Sharing the compiler used by the frontend is simpler and was verified against the backend source.
 - **Provider smoke tests in pull requests:** rejected because credentials, billing, and external outages should not determine the merge check. Provider connectivity remains an explicit manual/environment-level check.
 
 ## Interview explanation

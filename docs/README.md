@@ -6,6 +6,7 @@
 - [AI provider settings](product/ai-provider-settings.md): provider selection, key setup, privacy, states, and current limits.
 - [System overview](architecture/system-overview.md): component responsibilities, data flow, states, and failure recovery.
 - [Evolution log](architecture/evolution.md): dated architecture changes and deferred work.
+- [Real-source retrieval evaluation](evaluations/real-source-search-2026-11-03.md): six-query PostgreSQL search and citation baseline, findings, limitations, and next priority.
 - [YouTube timestamp normalization decision](decisions/youtube-transcript-timestamp-normalization.md): provider unit differences, migration repair, and citation consistency.
 - [Source library API](services/source-library-api.md), [transcript service and evidence workspace](services/transcript-service.md), [chat conversation service](services/chat-conversation-service.md), [request context middleware](services/request-context.md), [LLM provider service](services/llm-provider-service.md), [ingestion worker](services/ingestion-service.md), [PostgreSQL full-text search](services/postgres-full-text-search.md), and [retrieval/RAG](services/retrieval-rag-service.md): implementation contracts and operations.
 - `cd backend && npm test`: unit tests plus an optional PostgreSQL integration test. Set `VIDSCRIBE_TEST_DATABASE_URL` to a disposable empty database with `test` in its name to enable the integration case.

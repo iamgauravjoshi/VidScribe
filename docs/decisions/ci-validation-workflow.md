@@ -1,6 +1,6 @@
 # Pull request validation with GitHub Actions
 
-**Status:** Accepted — complete pull-request gate passed; real-source measurement awaits caption-accessible environment
+**Status:** Accepted — complete pull-request gate passed; local real-source baseline recorded
 **Date:** 2026-11-03
 
 ## Problem
@@ -36,7 +36,7 @@ This workflow reuses the exact isolated test database and browser runner already
 
 The workflow publishes a named check (`Build, PostgreSQL, and Playwright`). It does not itself change repository branch-protection settings; requiring the check before merge is a GitHub repository policy decision.
 
-Real-source retrieval measurement is intentionally separate from the required gate. The opt-in `real-source-evaluation.yml` workflow runs only when the `evaluate-real-source-search` label is applied to a pull request or it is manually dispatched. It uses a fresh isolated PostgreSQL database, fetches captions from three public YouTube sources, and measures local search/citation behavior without an answer-provider call or key. This sample can be affected by caption availability and is diagnostic rather than a merge gate. The first hosted attempt (run 41608747780) failed to fetch captions for all three sources and therefore produced no quality metrics. The evaluator skips unavailable sources but requires at least two usable sources and four labeled queries; a report with fewer is intentionally marked failed so it cannot be mistaken for a valid sample.
+Real-source retrieval measurement is intentionally separate from the required gate. The opt-in `real-source-evaluation.yml` workflow runs only when the `evaluate-real-source-search` label is applied to a pull request or it is manually dispatched. It uses a fresh isolated PostgreSQL database, fetches captions from three public YouTube sources, and measures local search/citation behavior without an answer-provider call or key. This sample can be affected by caption availability and is diagnostic rather than a merge gate. The first hosted attempt (run 41608747780) could not fetch captions for any of the three sources. A local run subsequently processed all three videos and produced six query results; see the [evaluation report](../evaluations/real-source-search-2026-11-03.md). The evaluator skips unavailable sources but requires at least two usable sources and four labeled queries; a report with fewer is intentionally marked failed so it cannot be mistaken for a valid sample.
 
 ## Example
 
@@ -49,7 +49,7 @@ For a pull request that changes transcript publication, the build and lint run f
 - PostgreSQL startup or test failures still execute the database cleanup step. The `down` command stops containers but preserves the named test volume.
 - The integration test requires `VIDSCRIBE_TEST_DATABASE_URL` and a database name containing `test`; the test Compose target uses the dedicated `vidscribe_test` database. No production or development database credentials are provided.
 - A cancelled or timed-out workflow may not complete every cleanup operation; the GitHub-hosted runner is ephemeral and is discarded after the job.
-- The first attempt failed in the backend build because the TypeScript 7 Linux compiler package was absent from the Windows-generated lockfile. Aligning the backend with the existing TypeScript 6 compiler fixed the problem; hosted run 41594485760 passed the initial gate. After adding timestamp-unit correction, migration 006 coverage, and the adapter tests, hosted run [41608534092](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41608534092) passed build, lint, the PostgreSQL suite, and all 5 Chromium tests. The opt-in real-source run [41608747780](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41608747780) did not reach search evaluation because GitHub-hosted runners could not retrieve captions for any configured video. Do not interpret that run as retrieval or citation quality evidence.
+- The first attempt failed in the backend build because the TypeScript 7 Linux compiler package was absent from the Windows-generated lockfile. Aligning the backend with the existing TypeScript 6 compiler fixed the problem; hosted run 41594485760 passed the initial gate. After adding timestamp-unit correction, migration 006 coverage, and adapter tests, hosted run [41608534092](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41608534092) passed the complete test gate. The documentation follow-up was also checked by run [41609369491](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41609369491). Hosted real-source evaluation [41608747780](https://github.com/iamgauravjoshi/VidScribe/actions/runs/41608747780) could not retrieve captions, but the local provider-free evaluation succeeded and is documented separately.
 
 ## Concurrency scenario
 
@@ -61,7 +61,7 @@ Runs for the same pull request/ref share a concurrency group. A newer commit can
 - **Cost:** the real browser and PostgreSQL make the workflow slower than unit-only CI. Chromium installation and database startup consume hosted runner minutes.
 - **Scope:** this gate validates current local application behavior. It does not validate live caption availability, real YouTube playback, provider credentials/model access, deployment, or semantic answer truthfulness.
 - **Enforcement:** the workflow creates a check, but administrators must configure GitHub branch protection if merges should be blocked until it passes.
-- **Reliability evidence:** run 41608534092 passed the complete current gate in about 66 seconds, including PostgreSQL migration coverage and 5 browser tests. The external caption evaluation is not currently reliable from GitHub-hosted runners; local Docker Desktop was unavailable during this pass as well. Repeated failures should be classified as code defects, environment assumptions, or flaky checks before adding retries.
+- **Reliability evidence:** run 41609369491 passed build, lint, PostgreSQL integration, all 5 browser tests, and cleanup in 1m11s. Caption access was unavailable on the GitHub runner, but a local evaluation completed with the disposable PostgreSQL container. Repeated failures should be classified as code defects, environment assumptions, or flaky checks before adding retries.
 
 ## Alternatives
 
@@ -81,6 +81,6 @@ Runs for the same pull request/ref share a concurrency group. A newer commit can
 
 **Why is real-source retrieval evaluation opt-in?** Caption fetching depends on an external provider and can fail independently of VidScribe changes. The required gate therefore remains deterministic and secret-free. A labeled/manual workflow still allows a real-caption sample when product decisions need evidence, without making every pull request wait on YouTube.
 
-**What did the first real-source attempt show?** It showed that GitHub-hosted runners could not retrieve captions for these three sources. No queries were evaluated, so it says nothing about search recall or citation accuracy. Rerun `npm run eval:real-sources` against the isolated test database from a machine/network where captions are accessible before using real-source metrics to prioritize product work.
+**Why didn't the first real-source attempt produce metrics?** GitHub-hosted runners could not retrieve captions for the selected videos. That run says nothing about search recall or citation accuracy. The local rerun succeeded; its small-sample results are in the [evaluation report](../evaluations/real-source-search-2026-11-03.md).
 
 **When should jobs be split or cached more aggressively?** After hosted run duration shows a real bottleneck. Today one job avoids duplicate installs and shares one test database across the two database-backed suites.

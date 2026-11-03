@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vidscribe-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Build, PostgreSQL, and Playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # Pin third-party actions to immutable commit SHAs; update intentionally with release notes.
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build backend and frontend
+        run: npm run build
+
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Start isolated PostgreSQL test database
+        run: docker compose -f docker-compose.test.yml up -d --wait
+
+      - name: Configure disposable test database connection
+        shell: bash
+        run: |
+          published_address="$(docker compose -f docker-compose.test.yml port postgres-test 5432)"
+          postgres_port="${published_address##*:}"
+          if [[ ! "$postgres_port" =~ ^[0-9]+$ ]]; then
+            echo "Could not determine the PostgreSQL test port from: $published_address" >&2
+            exit 1
+          fi
+
+          {
+            echo "VIDSCRIBE_TEST_DATABASE_URL=postgresql://vidscribe_test:vidscribe_test@127.0.0.1:${postgres_port}/vidscribe_test"
+            echo "POSTGRES_HOST=127.0.0.1"
+            echo "POSTGRES_PORT=${postgres_port}"
+            echo "POSTGRES_DB=vidscribe_test"
+            echo "POSTGRES_USER=vidscribe_test"
+            echo "POSTGRES_PASSWORD=vidscribe_test"
+          } >> "$GITHUB_ENV"
+
+      - name: Run backend unit and PostgreSQL integration tests
+        run: npm test
+        env:
+          NODE_ENV: test
+
+      - name: Install Playwright Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Run provider-free Playwright suite
+        run: npm run test:e2e
+        env:
+          NODE_ENV: test
+          CI: true
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-failure-artifacts
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop isolated PostgreSQL test database
+        if: always()
+        run: docker compose -f docker-compose.test.yml down

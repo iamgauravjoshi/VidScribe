@@ -107,6 +107,7 @@ QUEUED -> PROCESSING -> READY
 | `youtube-transcript`             | First source adapter; returns English transcript segments and timestamps. It is an external dependency and may fail independently.                                                                                                                                                                                                         |
 | Docker Compose                   | Starts the local PostgreSQL/pgvector service. The API, frontend, and Ollama are not containerized by the current Compose file.                                                                                                                                                                                                             |
 | Playwright Test                  | Runs deterministic Chromium checks through the real local API and isolated PostgreSQL database. The IFrame player is stubbed; AI and caption providers are not called.                                                                                                                                                                     |
+| GitHub Actions                   | Runs the repository's build, frontend lint, PostgreSQL lifecycle tests, and provider-free Playwright suite on each pull request. It gives the team repeatable merge feedback; requiring the check before merge is configured separately in repository branch rules.                                                                                 |
 | RabbitMQ                         | Not introduced. PostgreSQL is enough for the current single-host job volume and keeps source/job writes atomic. Add a broker only when measured throughput, independent worker scaling, or broker-specific delivery needs justify another operational system.                                                                              |
 
 ## Data model
@@ -152,6 +153,7 @@ scripts/dev.mjs                 Cross-platform launcher for backend and frontend
 scripts/test-e2e.mjs            Isolated test-database and Playwright browser-suite orchestration
 playwright.config.mts           Chromium project, temporary web servers, browser artifacts
 e2e/                            Browser scenarios and Playwright fixtures
+.github/workflows/ci.yml        Pull request build, lint, PostgreSQL, and provider-free browser gate
 backend/
   package.json                  Backend workspace scripts and dependencies
   migrations/                  Ordered SQL schema changes
@@ -227,6 +229,8 @@ The migrations intentionally change legacy table names/status values while retai
 
 ## Verification
 
+GitHub Actions runs `npm ci`, `npm run build`, `npm run lint`, the backend test suite with the isolated PostgreSQL database, and `npm run test:e2e` on every pull request. The browser job has no provider credentials or live AI calls. Playwright retains traces, screenshots, and its HTML report as a 14-day artifact when the job fails. See the [CI validation decision](decisions/ci-validation-workflow.md). The first hosted run is the acceptance check for this workflow; local success alone does not establish that GitHub's runner configuration is reliable.
+
 - Backend compile: `cd backend && npm run build`
 - Backend unit tests: `cd backend && npm test`
 - Frontend compile/build: `cd frontend && npm run build`
@@ -251,6 +255,7 @@ Latest browser-suite verification on 2026-11-03: `npm run test:e2e` passed all 5
 - [System overview](architecture/system-overview.md)
 - [Evolution log](architecture/evolution.md)
 - [Automated browser suite decision](decisions/automated-browser-suite.md)
+- [GitHub Actions validation decision](decisions/ci-validation-workflow.md)
 - [Source library API and service](services/source-library-api.md)
 - [Persisted chat conversation service](services/chat-conversation-service.md)
 - [Request context middleware](services/request-context.md)

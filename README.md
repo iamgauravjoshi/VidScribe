@@ -30,6 +30,10 @@ Docker Desktop must be running. The runner starts the isolated `vidscribe_test` 
 
 The browser tests use the real API and PostgreSQL transcript search/export endpoints, but skip the ingestion worker and replace the YouTube IFrame API with a deterministic browser stub. They cover citation seeking and player fallback, TXT/SRT/VTT downloads, transcript search and pagination, mobile-width overflow, and legacy refresh states including retryable and non-retryable failures. They do not call YouTube or an AI provider.
 
+## GitHub Actions validation
+
+Every pull request runs the **Build, PostgreSQL, and Playwright** check. It installs the locked npm workspaces, builds backend and frontend, runs frontend lint, starts the isolated `vidscribe_test` PostgreSQL service, runs backend unit/integration tests, and executes the Chromium suite. No AI provider keys or live provider requests are configured. If the job fails, GitHub retains Playwright screenshots, traces, and the HTML report for 14 days. The workflow also runs on pushes to `main`; it does not use the development database or port `3000`.
+
 ## PostgreSQL integration tests
 
 After creating the repository-root `.env`, start the isolated test database from the repository root:

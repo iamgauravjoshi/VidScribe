@@ -40,7 +40,7 @@ Playwright browser cases run sequentially with one worker so test-owned rows can
 
 ## Trade-offs
 
-The suite starts a real database and browser, so it is slower and requires Docker Desktop plus a one-time Chromium install. It is more representative than a mocked component test for this workflow. The browser player is stubbed and no live YouTube or LLM call is made. State changes that represent worker outcomes are applied directly to the test database rather than invoking the worker's external caption adapter.
+The suite starts a real database and browser, so it is slower and requires Docker Desktop plus a one-time Chromium install. It is more representative than a mocked component test for this workflow. The browser player is stubbed and no live YouTube or LLM call is made. State changes that represent worker outcomes are applied directly to the test database rather than invoking the worker's external caption adapter. GitHub Actions provisions this same Compose target for each pull request; see the [CI validation decision](ci-validation-workflow.md).
 
 ## Alternatives
 
@@ -59,4 +59,4 @@ The suite starts a real database and browser, so it is slower and requires Docke
 
 **Why not start the worker and pause it?** Without a worker, each browser state is deterministic and the test does not race an external caption request. Worker behavior already has backend-level integration coverage.
 
-**How should this run in CI?** Provision the same isolated PostgreSQL service, install the Playwright Chromium browser, then run `npm run test:e2e`; keep provider keys and real external API calls out of the pipeline.
+**How does CI run it?** The [CI workflow](ci-validation-workflow.md) starts the isolated Compose database, installs Chromium, and runs `npm run test:e2e` without provider keys or live caption/API requests.

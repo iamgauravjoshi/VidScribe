@@ -122,6 +122,7 @@ env/
 
 # Browser automation snapshots, screenshots, and test output
 /.playwright-mcp/
+/output/playwright/
 /playwright-report/
 /test-results/
 /blob-report/

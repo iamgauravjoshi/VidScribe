@@ -188,3 +188,13 @@ The Playwright runner applies migrations to the repository's dedicated `vidscrib
 **Example:** The expanded run found a target chunk in 17/18 questions by rank five, but an exact target-segment citation appeared by rank five in 11/18. This distinction exposes citation-selection problems that chunk recall alone hides. Definition-style cases were weakest in this small sample, so they are candidates for playback and answer review.
 
 **Follow-up:** Provider-free CI still tests SQL and API/browser contracts. The opt-in real-source evaluation provides caption-level diagnostics. A separate, small human-reviewed provider sample is needed before claiming answer-to-citation support. See the [evaluation decision](../decisions/human-labeled-evidence-evaluation.md).
+
+## Why is timestamp distance not enough to score a citation?
+
+**Short answer:** A close seek point can show related context without answering the question, while a slightly earlier point can be a useful lead-in. We need to inspect the answer and its cited excerpt together.
+
+**Deep answer:** Timestamp offset measures temporal proximity to a labeled transcript segment; exact segment identity measures whether the expected segment was selected. Neither checks whether the generated answer's claims are actually entailed by the citation. A player audit of eight mismatch cases confirmed both large-offset failures and close-but-insufficient citations. It also found one useful lead-in and a question whose visible support was absent from the top five. We therefore score answer correctness, evidence support, citation usefulness, and failure location separately.
+
+**Failure and trade-off:** Human judgments cost time and may differ, so a small sample is diagnostic rather than statistical. Provider-backed answers may also incur usage and reveal the question plus selected excerpts to the chosen provider. Keep a fixed small development set, record provider/model/usage, and add held-out cases before treating any ranking change as validated.
+
+**Follow-up:** Why not jump directly to semantic retrieval? First determine whether the miss is candidate retrieval, citation selection, or unsupported generation. Adding embeddings before identifying the limiting stage adds cost, complexity, and possibly a new transcript-transfer decision without fixing citation quality.

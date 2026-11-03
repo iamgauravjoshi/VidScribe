@@ -73,6 +73,14 @@ The evaluation is an opt-in single-run job against a dedicated empty database. I
 - **Use real YouTube fetches in required CI:** rejected because caption retrieval is network-dependent; CI retains synthetic PostgreSQL and provider-free browser checks.
 - **Add semantic/vector retrieval now:** deferred until a larger reviewed set demonstrates whether lexical recall or citation segment selection is the dominant gap.
 
+## Update: playback shows exact identity and offset are not enough
+
+The eight non-exact/offset/missing cases in dataset v2 were opened in the captioned video player. This confirmed the Golden Circle and habit-learning timestamps were unrelated to the direct answer, and the HAIL-love citation was late and did not identify love. Other cases were more nuanced: the HAIL-authenticity link was a useful lead-in about nine seconds early, while Dan Pink's autonomy citation was only about three seconds early but showed a list rather than the requested definition. A weight-assignment passage was visible at its label but had no top-five result.
+
+Therefore the answer evaluation will label answer correctness, citation entailment/support, citation usefulness, and likely failure stage separately. Timestamp distance remains an operational signal, not a support score. The five-question Gemini sample is specified in the [human-reviewed audit](../evaluations/human-reviewed-citation-answer-2026-11-03.md) but remains unscored: this evaluation process cannot decrypt the saved key and its chat attempt failed before provider dispatch. The user reported a successful UI answer, but that answer is not in this process's conversation record, so it cannot yet be used as evidence. No provider usage was recorded by the failed evaluation attempt.
+
+Do not tune the ranker on the answer sample and use those same questions as a final validation score. Treat them as development examples and add held-out human-reviewed cases after a change.
+
 ## Interview explanation
 
 “I made the retrieval benchmark distinguish finding a relevant chunk from citing the exact supporting caption. Each query has a manually selected transcript anchor phrase and an explicit occurrence if it repeats. This avoids a loose first-keyword label, while the exact segment check remains only a diagnostic: a neighboring sentence may still support the answer. I report rank and timestamp tail metrics and keep the run provider-free, so it is repeatable and does not imply answer correctness. Generated-answer support needs a separate human-reviewed sample.”

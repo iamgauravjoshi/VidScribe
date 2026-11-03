@@ -256,6 +256,8 @@ The synthetic fixture reports `Recall@3 = 0.75` across four queries. A paired th
 
 Expanded evaluation verification on 2026-11-03: root build and frontend lint passed; the provider-free backend suite passed 23/23 including PostgreSQL integration and anchor-label unit cases; strict TypeScript and Prettier checks passed for the evaluation utility. Dataset v2 ingested all six caption sources and evaluated all 18 questions with zero provider calls. The generated JSON report is ignored by Git and contains case-level target/citation links for manual review.
 
+Manual player review on 2026-11-03 checked all eight dataset-v2 cases with an absent, non-exact, or offset citation in YouTube's captioned player. It confirmed poor citations at large offsets, but also showed that a three-second offset can still fail to answer a definition, while a nine-second lead-in can be useful context. One labeled connection-weight passage is visible in the video but was absent from the top five. This validates that answer support needs human labels in addition to timestamp distance and exact segment identity. The development database was backed up and migrated from schema 004 to 006; the original two sources, one provider config, and eight messages were preserved. The user reported a successful Gemini UI answer, but the evaluation process still could not decrypt the saved key and its conversation database contained no successful answer to score. The three temporary evaluation sources were removed. No ranking change is justified until the reported output is captured and the runtime discrepancy is resolved. See the [player and answer evaluation](evaluations/human-reviewed-citation-answer-2026-11-03.md).
+
 ## Documentation map
 
 - [Product boundary](product/product-boundary.md)
@@ -268,6 +270,7 @@ Expanded evaluation verification on 2026-11-03: root build and frontend lint pas
 - [GitHub Actions validation decision](decisions/ci-validation-workflow.md)
 - [Segment-aware reranking and citations decision](decisions/segment-aware-reranking-and-citations.md)
 - [Human-labeled evidence evaluation decision](decisions/human-labeled-evidence-evaluation.md)
+- [Human-reviewed citation and answer evaluation](evaluations/human-reviewed-citation-answer-2026-11-03.md)
 - [Source library API and service](services/source-library-api.md)
 - [Persisted chat conversation service](services/chat-conversation-service.md)
 - [Request context middleware](services/request-context.md)

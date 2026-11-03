@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { AddSourceDialog } from './components/AddSourceDialog';
+import { BrandMark } from './components/BrandMark';
 import { AiSettingsPage } from './components/AiSettingsPage';
 import { AppSidebar } from './components/AppSidebar';
 import { LibraryPage } from './components/LibraryPage';
+import { MarketingSite } from './components/MarketingSite';
 import { SourceWorkspace } from './components/SourceWorkspace';
 import { ThemeSwitch } from './components/ThemeSwitch';
 import { ApiError, getApplicationHealth, getSources } from './services/api';
@@ -48,7 +50,7 @@ function getInitialTheme(): ThemeMode {
 function App() {
   const [pathname, navigate] = usePathname();
   const sourceId = sourceIdFromPath(pathname);
-  const isLibrary = pathname === '/' || pathname === '/library' || pathname === '/library/';
+  const isLibrary = pathname === '/library' || pathname === '/library/';
   const isSettings = pathname === '/settings/ai' || pathname === '/settings/appearance';
   const settingsSection = pathname === '/settings/appearance' ? 'appearance' : 'ai';
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
@@ -65,16 +67,16 @@ function App() {
     document.documentElement.dataset.theme = theme;
     const themeColorMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
     if (themeColorMeta) {
-      themeColorMeta.content = getComputedStyle(document.documentElement)
-        .getPropertyValue('--bg')
-        .trim();
+      themeColorMeta.content = pathname === '/'
+        ? '#ffffff'
+        : getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
     }
     try {
       window.localStorage.setItem('vidscribe.theme', theme);
     } catch {
       // The theme still applies for this session when browser storage is unavailable.
     }
-  }, [theme]);
+  }, [pathname, theme]);
 
   const refreshSources = useCallback(async () => {
     setLibraryLoading(true);
@@ -160,7 +162,7 @@ function App() {
         ? 'The selected AI provider settings could not be loaded. Check the database migration and try again.'
         : 'VidScribe could not check local services.';
 
-  return (
+  return pathname === '/' ? <MarketingSite /> : (
     <div className="app-shell">
       <AppSidebar
         currentPath={pathname}
@@ -192,6 +194,7 @@ function App() {
             ☰
           </button>
           <button className="mobile-brand" onClick={() => navigate('/library')} type="button">
+            <BrandMark className="brand-mark" />
             VidScribe
           </button>
           <ThemeSwitch compact onChange={setTheme} theme={theme} />

@@ -36,16 +36,10 @@
   cursor: pointer;
 }
 .brand-mark {
-  display: grid;
+  display: block;
   width: 30px;
   height: 30px;
-  color: var(--on-accent);
-  font-family: Georgia, serif;
-  font-size: 17px;
-  font-weight: 700;
-  place-items: center;
-  background: var(--accent);
-  border-radius: 9px 9px 9px 3px;
+  flex: 0 0 auto;
 }
 .sidebar-add {
   width: 100%;

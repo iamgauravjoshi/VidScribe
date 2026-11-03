@@ -1,4 +1,5 @@
 import type { Source } from '../types/types';
+import { BrandMark } from './BrandMark';
 import { SourceStatusBadge } from './SourceStatusBadge';
 
 interface Props {
@@ -30,9 +31,7 @@ export function AppSidebar({
   return (
     <aside className={`sidebar${isOpen ? ' sidebar-open' : ''}`}>
       <button className="brand-lockup" onClick={() => onNavigate('/library')} type="button">
-        <span className="brand-mark" aria-hidden="true">
-          V
-        </span>
+        <BrandMark className="brand-mark" />
         <span>VidScribe</span>
       </button>
       <button

@@ -2,6 +2,33 @@
 
 The repository history does not provide a reliable dated record of every earlier learning step. This ledger begins with the documented baseline and records changes made as the product architecture evolves.
 
+## 2026-11-04 — Add a Render deployment path
+
+### Previous approach
+
+The frontend and API ran as separate local development processes. The Render build compiled both workspaces successfully, but the configured `yarn start` command did not exist at the repository root. The backend also listened on loopback, expected individual local PostgreSQL variables, and depended on a filesystem encryption key.
+
+### Problem discovered
+
+A successful build did not produce a reachable application: Render could not start the configured command, serve the React application from the Node process, or provide the current local-only database/key assumptions. Publicly exposing the current shared data model without an access boundary would also expose provider settings and stored content.
+
+### New approach
+
+Add a root `npm start` script that runs pending migrations and starts the backend. In production, Express serves the built frontend and API from the same origin, honors Render's `PORT`, and binds to `0.0.0.0`. Render's Blueprint supplies PostgreSQL, a stable generated encryption key, and a required long password; the marketing homepage remains public while app routes and APIs require Basic Authentication.
+
+### Why this is better
+
+The app and its relative `/api` requests deploy as one coherent service. Deployment startup checks required configuration, applies serialized migrations before accepting traffic, and doesn't silently replace the provider-key encryption key during restarts. A separate liveness endpoint allows deploy health checks before an AI provider is configured.
+
+### Trade-offs and deferred work
+
+The shared Basic Authentication password is for one owner or trusted preview only; it does not create user identities or isolate data. Free Render Postgres expires after 30 days and the free web service can sleep, so the Blueprint is a preview default and the database must be upgraded before keeping important data. Account authentication, workspace ownership, and local-data migration remain separate work.
+
+### References
+
+- [Render single-owner deployment decision](../decisions/render-single-owner-deployment.md)
+- [Render Blueprint](../../render.yaml)
+
 ## Baseline — before source lifecycle phase
 
 - One Express process performed YouTube ingestion synchronously in the request path.

@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "start": "npm run db:migrate:prod --workspace=@vidscribe/backend && npm run start --workspace=@vidscribe/backend",
     "dev:backend": "npm run dev --workspace=@vidscribe/backend",
     "dev:frontend": "npm run dev --workspace=@vidscribe/frontend",
     "build": "npm run build --workspaces --if-present",

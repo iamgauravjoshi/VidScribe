@@ -1,6 +1,7 @@
 # VidScribe Documentation
 
 - [Project guide](PROJECT.md): product boundary, architecture, API, data model, local setup, and current limits.
+- [Render single-owner deployment decision](decisions/render-single-owner-deployment.md): same-origin marketing/app/API hosting, migration startup, stable secrets, and the private-workspace boundary.
 - [Product boundary](product/product-boundary.md): target user, v1 scope, non-goals, and acceptance criteria.
 - [Library and source workspace UX map](product/library-and-source-workspace.md): page and state behavior, including the transcript reader/player and current implementation status.
 - [AI provider settings](product/ai-provider-settings.md): provider selection, key setup, privacy, states, and current limits.

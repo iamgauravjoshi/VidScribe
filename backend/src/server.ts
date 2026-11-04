@@ -5,11 +5,14 @@ import { logger } from './shared/logger/index.js';
 import { startIngestionWorker } from './services/ingestion/worker.service.js';
 
 const app = createApp();
-// The current product boundary is a single-user local application. Keeping
-// the API on loopback prevents accidental exposure to the local network.
-const server = app.listen(config.server.port, '127.0.0.1', () => {
+if (config.nodeEnv === 'production' && (!config.access.password || config.access.password.length < 24)) {
+  throw new Error('Set VIDSCRIBE_ACCESS_PASSWORD to a unique password of at least 24 characters before starting production.');
+}
+
+const server = app.listen(config.server.port, config.server.host, () => {
   logger.info('VidScribe API started', {
     port: config.server.port,
+    host: config.server.host,
     environment: config.nodeEnv,
   });
 });

@@ -63,6 +63,20 @@ async function loadOrCreateKey(keyPath: string): Promise<Buffer> {
 }
 
 export function getLocalSecretEncryptionKey(keyPath = getLocalSecretKeyPath()): Promise<Buffer> {
+  const configuredKey = process.env.VIDSCRIBE_SECRET_ENCRYPTION_KEY;
+  if (configuredKey) {
+    const normalized = configuredKey.trim();
+    const decoded = Buffer.from(normalized, 'base64');
+    if (decoded.length !== KEY_LENGTH || decoded.toString('base64') !== normalized) {
+      throw new Error('VIDSCRIBE_SECRET_ENCRYPTION_KEY must be a base64-encoded 32-byte key.');
+    }
+    return Promise.resolve(decoded);
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('VIDSCRIBE_SECRET_ENCRYPTION_KEY must be configured in production.');
+  }
+
   const existing = keyPromises.get(keyPath);
   if (existing) return existing;
 

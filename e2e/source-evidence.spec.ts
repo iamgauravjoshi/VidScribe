@@ -133,7 +133,7 @@ test('source evidence workspace fits a narrow mobile viewport', async ({ page, c
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/sources/${source.id}`);
 
-  await expect(page.getByRole('heading', { name: 'Transcript' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Transcript', exact: true })).toBeVisible();
   await expect(page.locator('.transcript-segment')).toHaveCount(100);
   const hasNoHorizontalOverflow = await page.evaluate(() => (
     document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1

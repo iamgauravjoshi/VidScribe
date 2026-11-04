@@ -18,7 +18,7 @@ The browser would still have no production UI server, Render would not be able t
 
 ## Chosen approach
 
-Use one Render Node web service for the React static build and Express API, with one managed PostgreSQL database. The marketing page remains public at `/`; `/library`, source/settings pages, and API routes use HTTP Basic Authentication with a password provided through Render's dashboard. `npm start` runs the production migration command before the API server. The server binds to Render's `PORT` on `0.0.0.0`. Render injects `DATABASE_URL` and a generated base64 256-bit encryption key.
+Use one Render Node web service for the React static build and Express API, with one managed PostgreSQL database. The build explicitly installs dev dependencies for TypeScript/Vite, runs the build, then prunes dev dependencies from the runtime image. The marketing page remains public at `/`; `/library`, source/settings pages, and API routes use HTTP Basic Authentication with a password provided through Render's dashboard. `npm start` runs the production migration command before the API server. The server binds to Render's `PORT` on `0.0.0.0`. Render injects `DATABASE_URL` and a generated base64 256-bit encryption key.
 
 ## Why this fits now
 

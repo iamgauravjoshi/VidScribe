@@ -29,6 +29,33 @@ The shared Basic Authentication password is for one owner or trusted preview onl
 - [Render single-owner deployment decision](../decisions/render-single-owner-deployment.md)
 - [Render Blueprint](../../render.yaml)
 
+## 2026-11-04 — Install build tooling on Render, prune it before runtime
+
+### Previous approach
+
+The Render service installed dependencies while `NODE_ENV=production`, then ran the TypeScript/Vite build.
+
+### Problem discovered
+
+npm omits development dependencies in production mode by default. This removed `@types/node`, `@types/express`, and Vite from the build environment, causing TypeScript to report missing Node/Express/Vite types and the production build to fail.
+
+### New approach
+
+The Blueprint build command runs `npm ci --include=dev`, builds both workspaces, and then runs `npm prune --omit=dev` so the runtime install keeps production dependencies only.
+
+### Why this is better
+
+The build has its required toolchain while the deployed process does not retain TypeScript, Vite, lint, or test packages unnecessarily.
+
+### Trade-offs and deferred work
+
+This depends on Render using the Blueprint build command. A manually configured service must have its Build Command updated to match it, or sync the Blueprint before the next deploy.
+
+### References
+
+- [Render single-owner deployment decision](../decisions/render-single-owner-deployment.md)
+- [Render Blueprint](../../render.yaml)
+
 ## Baseline — before source lifecycle phase
 
 - One Express process performed YouTube ingestion synchronously in the request path.

@@ -15,7 +15,7 @@ The backend binds to `127.0.0.1`. Vite serves the local UI and proxies `/api` to
 
 ## Render deployment
 
-The root [`render.yaml`](render.yaml) defines one Render web service and a PostgreSQL database. The Node service serves the marketing page at `/`, serves the application UI at `/library` and its other app routes, and handles `/api` requests on the same origin. Render supplies `PORT` and `DATABASE_URL`; production migrations run before the server starts. The server binds to `0.0.0.0` in production and keeps loopback binding for local development.
+The root [`render.yaml`](render.yaml) defines one Render web service and a PostgreSQL database. The build command installs development dependencies needed by TypeScript and Vite, builds both workspaces, then prunes development-only packages from the runtime install. The Node service serves the marketing page at `/`, serves the application UI at `/library` and its other app routes, and handles `/api` requests on the same origin. Render supplies `PORT` and `DATABASE_URL`; production migrations run before the server starts. The server binds to `0.0.0.0` in production and keeps loopback binding for local development.
 
 To deploy, push this file to GitHub, then in Render choose **New → Blueprint**, connect the repository, and review the resources before applying. Render will ask you to set `VIDSCRIBE_ACCESS_PASSWORD`; use a long unique password and keep it private. The marketing homepage is public; app pages and API routes require HTTP Basic Authentication using username `vidscribe` and that password. This is a single-owner deployment with one shared workspace, not multi-user accounts. Do not give the password to untrusted visitors.
 

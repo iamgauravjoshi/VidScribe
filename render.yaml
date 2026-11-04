@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: vidscribe
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health/live
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vidscribe-postgres
+          property: connectionString
+      - key: VIDSCRIBE_SECRET_ENCRYPTION_KEY
+        generateValue: true
+      - key: VIDSCRIBE_ACCESS_USERNAME
+        value: vidscribe
+      - key: VIDSCRIBE_ACCESS_PASSWORD
+        sync: false
+
+databases:
+  - name: vidscribe-postgres
+    databaseName: vidscribe
+    user: vidscribe
+    plan: free

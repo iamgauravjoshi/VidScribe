@@ -15,6 +15,8 @@ dotenv.config({
   path: path.resolve(process.cwd(), '../.env'),
 });
 
+const databaseUrl = process.env.DATABASE_URL?.trim() || undefined;
+
 type NodeEnvironment = 'development' | 'test' | 'production';
 
 /**
@@ -112,15 +114,24 @@ export const config = {
   nodeEnv: getNodeEnvironment(),
 
   server: {
-    port: getNumberEnv('BACKEND_PORT', 8000),
+    port: process.env.PORT?.trim()
+      ? getNumberEnv('PORT')
+      : getNumberEnv('BACKEND_PORT', 8000),
+    host: process.env.NODE_ENV === 'production' ? '0.0.0.0' : getOptionalEnv('HOST', '127.0.0.1'),
   },
 
   postgres: {
-    host: getRequiredEnv('POSTGRES_HOST'),
-    port: getNumberEnv('POSTGRES_PORT'),
-    database: getRequiredEnv('POSTGRES_DB'),
-    user: getRequiredEnv('POSTGRES_USER'),
-    password: process.env.POSTGRES_PASSWORD ?? '',
+    connectionString: databaseUrl,
+    host: databaseUrl ? undefined : getRequiredEnv('POSTGRES_HOST'),
+    port: databaseUrl ? undefined : getNumberEnv('POSTGRES_PORT'),
+    database: databaseUrl ? undefined : getRequiredEnv('POSTGRES_DB'),
+    user: databaseUrl ? undefined : getRequiredEnv('POSTGRES_USER'),
+    password: databaseUrl ? undefined : (process.env.POSTGRES_PASSWORD ?? ''),
+  },
+
+  access: {
+    username: getOptionalEnv('VIDSCRIBE_ACCESS_USERNAME', 'vidscribe'),
+    password: process.env.VIDSCRIBE_ACCESS_PASSWORD?.trim() || undefined,
   },
 
   ollama: {

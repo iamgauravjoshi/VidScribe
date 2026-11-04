@@ -24,13 +24,17 @@ if (testDatabaseUrl && process.env.NODE_ENV !== 'test') {
 
 export const pool = testDatabaseUrl
   ? new Pool({ connectionString: testDatabaseUrl })
-  : new Pool({
-      host: config.postgres.host,
-      port: config.postgres.port,
-      database: config.postgres.database,
-      user: config.postgres.user,
-      password: config.postgres.password,
-    });
+  : new Pool(
+      config.postgres.connectionString
+        ? { connectionString: config.postgres.connectionString }
+        : {
+            host: config.postgres.host,
+            port: config.postgres.port,
+            database: config.postgres.database,
+            user: config.postgres.user,
+            password: config.postgres.password,
+          },
+    );
 
 // logger.info('PostgreSQL connection established');
 

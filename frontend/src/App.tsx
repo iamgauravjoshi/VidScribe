@@ -108,13 +108,15 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (pathname === '/') return;
+
     const timer = window.setTimeout(() => {
       void refreshSources();
       void refreshHealth();
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [refreshSources, refreshHealth]);
+  }, [pathname, refreshSources, refreshHealth]);
 
   const handleSourceChanged = useCallback((source: Source) => {
     setSources((previous) => {

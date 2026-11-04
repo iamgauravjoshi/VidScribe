@@ -13,6 +13,14 @@ VidScribe is a local-first workspace for asking questions about long-form learni
 
 The backend binds to `127.0.0.1`. Vite serves the local UI and proxies `/api` to it during development. In the app, open **Settings → AI model** to choose a provider, enter a key, and test/save the connection before new answers use it. The explicit test sends a short generation request and may incur provider usage. Gemini is selected by default; until you add its key or test/save another configured provider, question generation is disabled. Keys are encrypted by the backend and are never returned to the browser. PostgreSQL full-text search indexes transcript text locally; only the question and matched excerpts are sent to a selected cloud answer provider. The migrations rename the old video tables in place to preserve source and chunk rows, then add persisted conversations, provider settings, and the local search index; review them and back up an existing database before applying them.
 
+## Render deployment
+
+The root [`render.yaml`](render.yaml) defines one Render web service and a PostgreSQL database. The Node service serves the marketing page at `/`, serves the application UI at `/library` and its other app routes, and handles `/api` requests on the same origin. Render supplies `PORT` and `DATABASE_URL`; production migrations run before the server starts. The server binds to `0.0.0.0` in production and keeps loopback binding for local development.
+
+To deploy, push this file to GitHub, then in Render choose **New → Blueprint**, connect the repository, and review the resources before applying. Render will ask you to set `VIDSCRIBE_ACCESS_PASSWORD`; use a long unique password and keep it private. The marketing homepage is public; app pages and API routes require HTTP Basic Authentication using username `vidscribe` and that password. This is a single-owner deployment with one shared workspace, not multi-user accounts. Do not give the password to untrusted visitors.
+
+The Blueprint uses Render's free web and PostgreSQL plans to avoid creating paid resources without your approval. They are for previewing only: free web services can sleep, and free PostgreSQL expires after 30 days. Upgrade the database to a paid plan before storing anything you need to keep. Keep `VIDSCRIBE_SECRET_ENCRYPTION_KEY` unchanged and back it up securely; changing or losing it makes saved provider keys unreadable. Configure a Gemini or other provider key after opening **Settings → AI model** in the app.
+
 ## Documentation
 
 Start with the [project guide](docs/PROJECT.md) for architecture, data flow, reliability boundaries, and local setup. The [UX map](docs/product/library-and-source-workspace.md), [evolution log](docs/architecture/evolution.md), [service guides](docs/services/), [decision records](docs/decisions/), and [interview reference](docs/interview/engineering-concepts.md) explain how and why the current system is designed.

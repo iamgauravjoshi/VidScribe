@@ -164,18 +164,19 @@ export function MarketingSite() {
       <section aria-labelledby="privacy-title" className="privacy-section" id="privacy">
         <div className="privacy-copy">
           <p className="site-eyebrow">Your sources, your settings</p>
-          <h2 id="privacy-title">Your transcript stays on your computer.</h2>
+          <h2 id="privacy-title">Your transcript stays in your workspace.</h2>
           <p>
-            VidScribe stores transcript text and search data in your local PostgreSQL database.
-            If you choose a cloud model, your question and selected passages are sent to that
-            provider to generate an answer.
+            VidScribe stores transcript text and search data in its PostgreSQL database. With a
+            local install, that database is on your computer; with a hosted workspace, it is on
+            the configured server. If you choose a cloud model, your question and selected
+            passages are sent to that provider to generate an answer.
           </p>
         </div>
 
         <div className="privacy-details">
           <div>
             <span className="privacy-detail-mark"><Check aria-hidden="true" size={15} /></span>
-            <p><strong>On your computer</strong><span>Transcript and search</span></p>
+            <p><strong>In your workspace</strong><span>Transcript and search</span></p>
           </div>
           <div>
             <span className="privacy-detail-mark privacy-detail-mark-outline"><ArrowRight aria-hidden="true" size={15} /></span>
